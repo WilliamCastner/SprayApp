@@ -20,9 +20,9 @@ Spray wall app for local gym.
 
 ---
 
-### Running the Backend
+## TODO
+User authentication
 
-1. Navigate to the backend folder:
-   ```bash
-   cd backend
-   ```
+Create routes for user post / get and climb post / get
+
+Look into iOS development
