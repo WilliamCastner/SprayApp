@@ -3,9 +3,8 @@
    Not auth = display sign in / register page
 */
 import 'package:flutter/material.dart';
-import 'package:namer_app/Activity.dart';
+import 'package:namer_app/Home.dart';
 import 'package:namer_app/LoginPage.dart';
-import 'package:namer_app/Profile.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthGate extends StatelessWidget {
@@ -27,7 +26,7 @@ class AuthGate extends StatelessWidget {
         final session = snapshot.hasData ? snapshot.data!.session : null;
 
         if (session != null) {
-          return ProfilePage();
+          return HomeWithNav();
         } else {
           return LoginPage();
         }

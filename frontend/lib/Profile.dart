@@ -1,36 +1,41 @@
 import 'package:flutter/material.dart';
+import 'package:namer_app/AuthService.dart';
 
-class ProfilePage extends StatelessWidget {
+class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    // Mock user info
-    final userName = "Climber123";
-    final email = "climber@example.com";
+  State<ProfilePage> createState() => _profilePageState();
+}
 
+class _profilePageState extends State<ProfilePage> {
+  final authService = AuthService();
+
+  void logout() async {
+    await authService.signOut();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const CircleAvatar(radius: 50, child: Icon(Icons.person, size: 50)),
-            const SizedBox(height: 24),
-            Text(
-              "Username: $userName",
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Text("Email: $email", style: Theme.of(context).textTheme.bodyLarge),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () {
-                // TODO: Add logout or edit profile functionality
-              },
-              child: const Text("Logout"),
-            ),
-          ],
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const CircleAvatar(
+                radius: 50,
+                child: Icon(Icons.person, size: 50),
+              ),
+              const SizedBox(height: 24),
+              Text("Username: ", style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text("Email: ", style: Theme.of(context).textTheme.bodyLarge),
+              const SizedBox(height: 24),
+              ElevatedButton(onPressed: logout, child: const Text("Logout")),
+            ],
+          ),
         ),
       ),
     );

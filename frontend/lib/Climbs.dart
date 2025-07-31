@@ -38,7 +38,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
     setState(() {
       for (final hold in holdsList) {
         if (_isPointInPolygon(scaledTapPos, hold.points)) {
-          hold.selected = (hold.selected + 1) % 4;
+          hold.selected = (hold.selected + 1) % 5;
           if (hold.selected == 0) {
             selectedHolds.remove(hold);
           } else if (!selectedHolds.contains(hold)) {
@@ -222,9 +222,14 @@ class _ClimbsPageState extends State<ClimbsPage> {
                           print('Selected Holds:');
                           for (int i = 0; i < holdsList.length; i++) {
                             if (selectedHolds.contains(holdsList[i])) {
-                              print(
-                                'Index $i: ${holdsList[i].selected == 1 ? "hand" : "foot"}',
-                              );
+                              final type = switch (holdsList[i].selected) {
+                                1 => "hand",
+                                2 => "foot",
+                                3 => "start",
+                                4 => "finish",
+                                _ => "unknown",
+                              };
+                              print('Index $i: $type');
                             }
                           }
 
@@ -266,6 +271,7 @@ class _HtmlMapPainter extends CustomPainter {
           1 => Colors.blue.withOpacity(0.5), // hand
           2 => Colors.orange.withOpacity(0.5), // foot
           3 => Colors.green.withOpacity(0.5), // start
+          4 => Colors.purple.withOpacity(0.5), // finish
           _ => Colors.transparent,
         }
         ..style = PaintingStyle.fill;
