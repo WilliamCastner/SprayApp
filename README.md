@@ -8,7 +8,7 @@ Spray wall app for local gym.
 
 - **Backend:** .NET Web API (ASP.NET Core)
 - **Frontend:** Flutter
-
+- **Database:** Supabase
 ---
 
 ## Getting Started
