@@ -1,6 +1,8 @@
 import 'package:english_words/english_words.dart';
 import 'package:flutter/material.dart';
+import 'package:namer_app/AuthGate.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'LoginPage.dart';
 import 'RegisterPage.dart';
@@ -9,7 +11,15 @@ import 'Profile.dart';
 import 'Activity.dart';
 import 'ClimbList.dart';
 
-void main() {
+void main() async {
+  // Supabase setup
+
+  await Supabase.initialize(
+    anonKey:
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvaWxkb2dncGJ1Yml2dWlncW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM3MTUzNTgsImV4cCI6MjA2OTI5MTM1OH0.f2n8gquVdGel81MyE4dD9M68B-IHk-DIxyWaaunbuIc",
+    url: "https://foildoggpbubivuigqmj.supabase.co",
+  );
+
   runApp(const MyApp());
 }
 
@@ -18,33 +28,8 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => MyAppState(),
-      child: MaterialApp(
-        title: 'Namer App',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
-          bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-            backgroundColor: Colors.black,
-            selectedItemColor: Colors.deepOrange,
-            unselectedItemColor: Colors.white54,
-            type: BottomNavigationBarType.fixed,
-          ),
-        ),
-        initialRoute: '/login',
-        routes: {
-          '/login': (context) => const LoginPage(),
-          '/register': (context) => const RegisterPage(),
-          // Wrap LandingPage with Bottom Navigation
-          '/home': (context) => const HomeWithBottomNav(),
-        },
-      ),
-    );
+    return const MaterialApp(home: AuthGate());
   }
-}
-
-class MyAppState extends ChangeNotifier {
-  var current = WordPair.random();
 }
 
 // New widget that holds the Bottom Navigation and switches pages

@@ -1,4 +1,5 @@
 # =============== .NET (C#, ASP.NET Core) ===============
+appsettings.json
 bin/
 obj/
 *.user
