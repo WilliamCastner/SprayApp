@@ -9,6 +9,7 @@ Spray wall app for local gym.
 - **Backend:** .NET Web API (ASP.NET Core)
 - **Frontend:** Flutter
 - **Database:** Supabase
+
 ---
 
 ## Getting Started
@@ -21,8 +22,11 @@ Spray wall app for local gym.
 ---
 
 ## TODO
-User authentication
 
 Create routes for user post / get and climb post / get
 
 Look into iOS development
+
+Allow for route editing
+
+Fix outlines for bottom section of holds
