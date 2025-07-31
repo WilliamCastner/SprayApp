@@ -1,4 +1,4 @@
-# Project Name
+# Spray App
 
 Spray wall app for local gym.
 
