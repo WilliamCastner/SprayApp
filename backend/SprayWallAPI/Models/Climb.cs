@@ -9,7 +9,7 @@ namespace SprayWallAPI.Models
         [PrimaryKey("climbid", false)]
         public Guid ClimbId { get; set; }
 
-        [Column("userid")]
+        [Column("id")]
         public Guid UserId { get; set; }
 
         [Column("name")]
@@ -24,3 +24,4 @@ namespace SprayWallAPI.Models
         [Column("createdat")]
         public DateTime CreatedAt { get; set; }
     }
+}

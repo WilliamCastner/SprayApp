@@ -21,3 +21,4 @@ namespace SprayWallAPI.Models
         [Column("password_hash")]
         public string? PasswordHash { get; set; }
     }
+}

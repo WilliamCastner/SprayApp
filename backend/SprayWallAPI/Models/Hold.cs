@@ -9,3 +9,4 @@ namespace SprayWallAPI.Models
         [PrimaryKey("array_index", false)]
         public short ArrayIndex { get; set; }
     }
+}
