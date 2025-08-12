@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'holds.dart';
+import 'package:uuid/uuid.dart';
 
 const double originalImageWidth = 5712;
 const double originalImageHeight = 4284;
@@ -20,6 +22,11 @@ class _ClimbsPageState extends State<ClimbsPage> {
   void initState() {
     super.initState();
     holdsList = holds;
+  }
+
+  String generateUuid() {
+    final uuid = Uuid();
+    return uuid.v4();
   }
 
   void _handleTap(TapUpDetails details, Size displayedImageSize) {
@@ -49,6 +56,48 @@ class _ClimbsPageState extends State<ClimbsPage> {
         }
       }
     });
+  }
+
+  Future<void> _insertClimbs(
+    String name,
+    String grade,
+    List<Map<String, dynamic>> holds,
+  ) async {
+    String climbId = generateUuid();
+    final user = Supabase.instance.client.auth.currentUser;
+
+    try {
+      await Supabase.instance.client.from('climbs').insert({
+        'climbid': climbId,
+        'id': user?.id, // make sure to get the user's id string
+        'name': name,
+        'grade': grade,
+      });
+    } catch (e) {
+      print("Error inserting climbs {$e}");
+    }
+
+    final List<Map<String, dynamic>> holdsToInsert = holds.map((hold) {
+      return {
+        'climbid': climbId,
+        'array_index': hold['array_index'],
+        'holdstate': hold['holdstate'],
+      };
+    }).toList();
+
+    // Insert holds
+    try {
+      await Supabase.instance.client.from('climbholds').insert(holdsToInsert);
+    } catch (e) {
+      print("Error inserting holds: {$e}");
+    }
+
+    print("Succesfully added climb + holds");
+
+    for (final hold in holdsList) {
+      hold.selected = 0;
+    }
+    super.dispose();
   }
 
   @override
@@ -217,23 +266,17 @@ class _ClimbsPageState extends State<ClimbsPage> {
                           climbGrade = 'V$_sliderValue';
 
                           // For now, just print the info and selected holds:
-                          print('Climb Name: $climbName');
-                          print('Description: $climbDescription');
-                          print('Selected Holds:');
+                          final List<Map<String, dynamic>> holdData = [];
+
                           for (int i = 0; i < holdsList.length; i++) {
                             if (selectedHolds.contains(holdsList[i])) {
-                              final type = switch (holdsList[i].selected) {
-                                1 => "hand",
-                                2 => "foot",
-                                3 => "start",
-                                4 => "finish",
-                                _ => "unknown",
-                              };
-                              print('Index $i: $type');
+                              holdData.add({
+                                'array_index': i,
+                                'holdstate': holdsList[i].selected,
+                              });
                             }
                           }
-
-                          // TODO: Save to your backend or local storage here.
+                          _insertClimbs(climbName, climbGrade, holdData);
                         }
                       },
                     ),

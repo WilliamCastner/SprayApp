@@ -17,16 +17,10 @@ class _HomeWithNavState extends State<HomeWithNav> {
   final List<Widget> _pages = const [
     ProfilePage(),
     ClimbList(),
-    ActivityPage(),
     ClimbsPage(), // assumed to be the create climb page
   ];
 
-  final List<String> _titles = [
-    'Profile',
-    'Climb List',
-    'Activity',
-    'New Climb',
-  ];
+  final List<String> _titles = ['Profile', 'Problems', 'New Climb'];
 
   void _onItemTapped(int index) {
     setState(() => _selectedIndex = index);
@@ -45,10 +39,7 @@ class _HomeWithNavState extends State<HomeWithNav> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
           BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Climbs'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.timeline),
-            label: 'Activity',
-          ),
+
           BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Create'),
         ],
       ),
