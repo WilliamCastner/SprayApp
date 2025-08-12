@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+// Not using page currently
+
+// TODO: Add activity page that displays user sends + climb creation
+
 class ActivityPage extends StatelessWidget {
   const ActivityPage({super.key});
 

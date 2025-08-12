@@ -116,10 +116,10 @@ class _ClimbsPageState extends State<ClimbsPage> {
           double displayedHeight;
 
           if (maxWidth / maxHeight > imageAspectRatio) {
-            displayedHeight = maxHeight * 0.75;
+            displayedHeight = maxHeight * 0.9;
             displayedWidth = displayedHeight * imageAspectRatio;
           } else {
-            displayedWidth = maxWidth * 0.75;
+            displayedWidth = maxWidth * 0.9;
             displayedHeight = displayedWidth / imageAspectRatio;
           }
 
@@ -129,7 +129,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
             child: Center(
               child: Column(
                 children: [
-                  const SizedBox(height: 32), // ✅ Top padding
+                  const SizedBox(height: 16), // ✅ Top padding
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: InteractiveViewer(
@@ -154,6 +154,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
                                 holdsList,
                                 displayedWidth / originalImageWidth,
                                 displayedHeight / originalImageHeight,
+                                constraints.maxWidth / 1500,
                               ),
                             ),
                           ],
@@ -295,8 +296,9 @@ class _HtmlMapPainter extends CustomPainter {
   final List<HtmlMapHold> holds;
   final double scaleX;
   final double scaleY;
+  final double fontScale;
 
-  _HtmlMapPainter(this.holds, this.scaleX, this.scaleY);
+  _HtmlMapPainter(this.holds, this.scaleX, this.scaleY, this.fontScale);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -311,10 +313,10 @@ class _HtmlMapPainter extends CustomPainter {
 
       final fillPaint = Paint()
         ..color = switch (hold.selected) {
-          1 => Colors.blue.withOpacity(0.5), // hand
-          2 => Colors.orange.withOpacity(0.5), // foot
-          3 => Colors.green.withOpacity(0.5), // start
-          4 => Colors.purple.withOpacity(0.5), // finish
+          1 => Colors.blue.withOpacity(0.5), // Hand
+          2 => Colors.orange.withOpacity(0.5), // Foot
+          3 => Colors.green.withOpacity(0.5), // Start
+          4 => Colors.purple.withOpacity(0.5), // Finish
           _ => Colors.transparent,
         }
         ..style = PaintingStyle.fill;
@@ -324,8 +326,56 @@ class _HtmlMapPainter extends CustomPainter {
         ..strokeWidth = 2
         ..style = PaintingStyle.stroke;
 
+      // Draw the polygon
       canvas.drawPath(path, fillPaint);
       canvas.drawPath(path, strokePaint);
+
+      // Determine hold label
+      final holdLabel = switch (hold.selected) {
+        1 => 'Hand',
+        2 => 'Foot',
+        3 => 'Start',
+        4 => 'Finish',
+        _ => '',
+      };
+
+      // Draw label text in the center of the hold
+      if (holdLabel.isNotEmpty) {
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: holdLabel,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 6 * fontScale,
+              fontWeight: FontWeight.bold,
+              shadows: [
+                Shadow(
+                  blurRadius: 3,
+                  color: Colors.black,
+                  offset: Offset(1, 1),
+                ),
+              ],
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+
+        textPainter.layout();
+
+        // Find center of polygon to place text
+        final centerX =
+            scaledPoints.map((p) => p.dx).reduce((a, b) => a + b) /
+            scaledPoints.length;
+        final centerY =
+            scaledPoints.map((p) => p.dy).reduce((a, b) => a + b) /
+            scaledPoints.length;
+        final center = Offset(centerX, centerY);
+
+        textPainter.paint(
+          canvas,
+          center - Offset(textPainter.width / 2, textPainter.height / 2),
+        );
+      }
     }
   }
 

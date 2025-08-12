@@ -16,7 +16,7 @@ class AuthGate extends StatelessWidget {
       // Listen to auth state
       stream: Supabase.instance.client.auth.onAuthStateChange,
 
-      // Build based on auth state
+      // Build based on auth state -> if auth then user is signed in
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
