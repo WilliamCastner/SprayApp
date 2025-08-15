@@ -143,7 +143,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
                         child: Stack(
                           children: [
                             Image.asset(
-                              '../assets/spray_wall.jpeg',
+                              'assets/spray_wall.jpeg',
                               width: displayedWidth,
                               height: displayedHeight,
                               fit: BoxFit.fill,
@@ -185,7 +185,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
   }
 
   void _openCreateClimbForm(BuildContext context) {
-    final _formKey = GlobalKey<FormState>();
+    final formKey = GlobalKey<FormState>();
     String climbName = '';
     String climbDescription = '';
     String climbGrade = '';
@@ -202,7 +202,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
             top: 16,
           ),
           child: Form(
-            key: _formKey,
+            key: formKey,
             child: Wrap(
               children: [
                 Text(
@@ -261,8 +261,8 @@ class _ClimbsPageState extends State<ClimbsPage> {
                     ElevatedButton(
                       child: const Text('Save'),
                       onPressed: () {
-                        if (_formKey.currentState!.validate()) {
-                          _formKey.currentState!.save();
+                        if (formKey.currentState!.validate()) {
+                          formKey.currentState!.save();
                           Navigator.pop(context);
                           climbGrade = 'V$_sliderValue';
 

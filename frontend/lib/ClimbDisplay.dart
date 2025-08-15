@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'holds.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -104,7 +103,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
   }
 
   void _sendForm(BuildContext context) {
-    final _formKey = GlobalKey<FormState>();
+    final formKey = GlobalKey<FormState>();
 
     showModalBottomSheet(
       context: context,
@@ -118,7 +117,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
             top: 16,
           ),
           child: Form(
-            key: _formKey,
+            key: formKey,
             child: Wrap(
               children: [
                 Text('Log send', style: Theme.of(context).textTheme.titleLarge),
@@ -163,8 +162,8 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                     ElevatedButton(
                       child: const Text('Save'),
                       onPressed: () {
-                        if (_formKey.currentState!.validate()) {
-                          _formKey.currentState!.save();
+                        if (formKey.currentState!.validate()) {
+                          formKey.currentState!.save();
                           Navigator.pop(context);
 
                           // For now, just print the info and selected holds:
@@ -402,7 +401,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                         child: Stack(
                           children: [
                             Image.asset(
-                              '../assets/spray_wall.jpeg',
+                              'assets/spray_wall.jpeg',
                               width: displayedWidth,
                               height: displayedHeight,
                               fit: BoxFit.fill,

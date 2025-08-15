@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:namer_app/Profile.dart';
 import 'package:namer_app/ClimbList.dart';
-import 'package:namer_app/Activity.dart';
 import 'package:namer_app/Climbs.dart'; // This is assumed to be the climb creation page
 
 class HomeWithNav extends StatefulWidget {

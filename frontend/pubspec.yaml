@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
   english_words: ^4.0.0
   xml: ^6.3.0
   provider: ^6.1.5
@@ -16,6 +17,7 @@ dependencies:
   http: ^1.4.0
   fl_chart: ^0.68.0
   uuid: ^4.4.0
+  firebase_core: ^4.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -23,3 +25,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/spray_wall.jpeg
