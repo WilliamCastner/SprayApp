@@ -58,10 +58,12 @@ class _RegisterPageState extends State<RegisterPage> {
           TextField(
             controller: _passwordController,
             decoration: const InputDecoration(labelText: "Password"),
+            obscureText: true,
           ),
           TextField(
             controller: _confirmPassword,
             decoration: const InputDecoration(labelText: "Confirm Password"),
+            obscureText: true,
           ),
           // login button
           const SizedBox(height: 12),
@@ -78,7 +80,6 @@ class _RegisterPageState extends State<RegisterPage> {
               context,
               MaterialPageRoute(builder: (context) => const RegisterPage()),
             ),
-            child: Center(child: Text("Don't have an account? Sign Up")),
           ),
         ],
       ),

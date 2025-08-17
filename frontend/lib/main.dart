@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:namer_app/AuthGate.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() async {
-  // Supabase setup
+  WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
     anonKey:
@@ -19,6 +20,17 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(home: AuthGate());
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'SprayWall',
+      home: const AuthGate(),
+      theme: ThemeData(
+        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+          selectedItemColor: Colors.deepOrange,
+          unselectedItemColor: Colors.grey,
+        ),
+        textTheme: GoogleFonts.urbanistTextTheme(), // cool modern font
+      ),
+    );
   }
 }

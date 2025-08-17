@@ -291,8 +291,8 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
         title: LayoutBuilder(
           builder: (context, constraints) {
             final screenWidth = constraints.maxWidth;
-            final targetRightPos = screenWidth * 0.265;
-            final targetLeftPos = screenWidth * 0.215;
+            final targetRightPos = screenWidth * 0.1;
+            final targetLeftPos = screenWidth * 0.05;
 
             return Stack(
               children: [
@@ -304,7 +304,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                         : climbGrade.isEmpty
                         ? climbName
                         : '$climbName |  $climbGrade',
-                    style: TextStyle(fontSize: screenWidth / 65),
+                    style: TextStyle(fontSize: screenWidth / 30),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -319,13 +319,13 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                     icon: Icon(
                       Icons.add,
                       color: Colors.black,
-                      size: screenWidth / 100,
+                      size: screenWidth / 40,
                     ),
                     label: Text(
                       'Log',
                       style: TextStyle(
                         color: Colors.black,
-                        fontSize: screenWidth / 100,
+                        fontSize: screenWidth / 40,
                       ),
                     ),
                     style: TextButton.styleFrom(
@@ -345,13 +345,13 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                     icon: Icon(
                       Icons.info,
                       color: Colors.black,
-                      size: screenWidth / 100,
+                      size: screenWidth / 40,
                     ),
                     label: Text(
                       'Info',
                       style: TextStyle(
                         color: Colors.black,
-                        fontSize: screenWidth / 100,
+                        fontSize: screenWidth / 40,
                       ),
                     ),
                     style: TextButton.styleFrom(
@@ -371,6 +371,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
         builder: (context, constraints) {
           final maxWidth = constraints.maxWidth;
           final maxHeight = constraints.maxHeight;
+          final fontScale = constraints.maxWidth / 1500;
 
           double displayedWidth;
           double displayedHeight;
@@ -412,6 +413,7 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                                 holdsList,
                                 displayedWidth / originalImageWidth,
                                 displayedHeight / originalImageHeight,
+                                fontScale,
                               ),
                             ),
                           ],
@@ -434,8 +436,9 @@ class _HtmlMapPainter extends CustomPainter {
   final List<HtmlMapHold> holds;
   final double scaleX;
   final double scaleY;
+  final double fontScale;
 
-  _HtmlMapPainter(this.holds, this.scaleX, this.scaleY);
+  _HtmlMapPainter(this.holds, this.scaleX, this.scaleY, this.fontScale);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -465,6 +468,52 @@ class _HtmlMapPainter extends CustomPainter {
 
       canvas.drawPath(path, fillPaint);
       canvas.drawPath(path, strokePaint);
+
+      final holdLabel = switch (hold.selected) {
+        1 => 'Hand',
+        2 => 'Foot',
+        3 => 'Start',
+        4 => 'Finish',
+        _ => '',
+      };
+
+      // Draw label text in the center of the hold
+      if (holdLabel.isNotEmpty) {
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: holdLabel,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 15 * fontScale,
+              fontWeight: FontWeight.bold,
+              shadows: [
+                Shadow(
+                  blurRadius: 3,
+                  color: Colors.black,
+                  offset: Offset(1, 1),
+                ),
+              ],
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+
+        textPainter.layout();
+
+        // Find center of polygon to place text
+        final centerX =
+            scaledPoints.map((p) => p.dx).reduce((a, b) => a + b) /
+            scaledPoints.length;
+        final centerY =
+            scaledPoints.map((p) => p.dy).reduce((a, b) => a + b) /
+            scaledPoints.length;
+        final center = Offset(centerX, centerY);
+
+        textPainter.paint(
+          canvas,
+          center - Offset(textPainter.width / 2, textPainter.height / 2),
+        );
+      }
     }
   }
 

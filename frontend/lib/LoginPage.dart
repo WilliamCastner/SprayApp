@@ -39,6 +39,14 @@ class _LoginPageState extends State<LoginPage> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
         children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 24.0),
+            child: Text(
+              "FA Humboldt Spray Wall Database",
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+          ),
           //email
           TextField(
             controller: _emailController,
@@ -48,6 +56,7 @@ class _LoginPageState extends State<LoginPage> {
           TextField(
             controller: _passwordController,
             decoration: const InputDecoration(labelText: "Password"),
+            obscureText: true,
           ),
           // login button
           const SizedBox(height: 12),
@@ -56,12 +65,34 @@ class _LoginPageState extends State<LoginPage> {
 
           const SizedBox(height: 12),
 
-          GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const RegisterPage()),
+          Center(
+            child: SizedBox(
+              width: MediaQuery.of(context).size.width * 0.4,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RegisterPage()),
+                ),
+                hoverColor: Colors.grey.withOpacity(0.2),
+                splashColor: Colors.grey.withOpacity(0.3),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 12,
+                  ),
+                  child: Center(
+                    child: Text(
+                      "Don't have an account? Sign Up",
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
-            child: Center(child: Text("Don't have an account? Sign Up")),
           ),
         ],
       ),

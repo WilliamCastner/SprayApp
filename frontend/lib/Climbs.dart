@@ -129,7 +129,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
             child: Center(
               child: Column(
                 children: [
-                  const SizedBox(height: 16), // ✅ Top padding
+                  const SizedBox(height: 100), // ✅ Top padding
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: InteractiveViewer(
@@ -234,7 +234,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
                           min: 0,
                           max: 17,
                           divisions: 17,
-                          label: 'V$_sliderValue',
+                          label: 'v$_sliderValue',
                           onChanged: (newValue) {
                             setModalState(() {
                               _sliderValue = newValue.round();
@@ -243,7 +243,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
                         ),
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
-                          child: Text('Selected Grade: V$_sliderValue'),
+                          child: Text('Selected Grade: v$_sliderValue'),
                         ),
                       ],
                     );
@@ -346,7 +346,7 @@ class _HtmlMapPainter extends CustomPainter {
             text: holdLabel,
             style: TextStyle(
               color: Colors.white,
-              fontSize: 6 * fontScale,
+              fontSize: 15 * fontScale,
               fontWeight: FontWeight.bold,
               shadows: [
                 Shadow(

@@ -14,3 +14,13 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## TODO
+
+add intro blurb to register page
+add logbook to profile page
+in sends chart, only get unique climb ascents
+add more filters to climb list tab
+add user send display chart
+add activity tab
+force user to select at least one start / finish hold(s)

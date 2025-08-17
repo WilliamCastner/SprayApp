@@ -13,6 +13,7 @@ class _ClimbListState extends State<ClimbList> {
   String searchQuery = '';
   int minGrade = 0;
   int maxGrade = 16;
+  bool onlyMine = false; // NEW
   List<Map<String, dynamic>> allClimbs = [];
 
   @override
@@ -25,8 +26,7 @@ class _ClimbListState extends State<ClimbList> {
     try {
       final response = await Supabase.instance.client
           .from('climbs')
-          .select('climbid, name, grade');
-
+          .select('climbid, name, grade, id'); // include creator id
       setState(() {
         allClimbs = List<Map<String, dynamic>>.from(response);
       });
@@ -36,6 +36,7 @@ class _ClimbListState extends State<ClimbList> {
   }
 
   List<Map<String, dynamic>> get filteredClimbs {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
     return allClimbs.where((climb) {
       final nameMatch = climb['name'].toString().toLowerCase().contains(
         searchQuery.toLowerCase(),
@@ -44,15 +45,18 @@ class _ClimbListState extends State<ClimbList> {
       final gradeStr = climb['grade'] ?? '';
       final gradeNum = _extractGradeNumber(gradeStr);
 
+      final matchesMine =
+          !onlyMine || (userId != null && climb['id'] == userId);
+
       return nameMatch &&
           gradeNum != null &&
           gradeNum >= minGrade &&
-          gradeNum <= maxGrade;
+          gradeNum <= maxGrade &&
+          matchesMine;
     }).toList();
   }
 
   int? _extractGradeNumber(String grade) {
-    // Extract number from grade string like 'V5'
     final match = RegExp(r'V(\d+)').firstMatch(grade.toUpperCase());
     if (match != null) {
       return int.tryParse(match.group(1)!);
@@ -65,6 +69,7 @@ class _ClimbListState extends State<ClimbList> {
       minGrade.toDouble(),
       maxGrade.toDouble(),
     );
+    bool tempOnlyMine = onlyMine;
 
     showDialog(
       context: context,
@@ -93,6 +98,17 @@ class _ClimbListState extends State<ClimbList> {
                 Text(
                   'From V${selectedRange.start.round()} to V${selectedRange.end.round()}',
                 ),
+                const SizedBox(height: 10),
+                CheckboxListTile(
+                  title: const Text('Set By Me'),
+                  value: tempOnlyMine,
+                  onChanged: (value) {
+                    setStateDialog(() {
+                      tempOnlyMine = value ?? false;
+                    });
+                  },
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
               ],
             );
           },
@@ -107,6 +123,7 @@ class _ClimbListState extends State<ClimbList> {
               setState(() {
                 minGrade = selectedRange.start.round();
                 maxGrade = selectedRange.end.round();
+                onlyMine = tempOnlyMine;
               });
               Navigator.pop(context);
             },
