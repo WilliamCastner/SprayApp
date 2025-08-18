@@ -1,8 +1,8 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:namer_app/AuthService.dart';
+import 'package:namer_app/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:convert';
+import 'logbook.dart'; // <--- make sure this import path is correct!
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -28,14 +28,23 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void openLogbook() {
-    // TODO: Navigator.push to your Logbook screen
-    print("Logbook tapped");
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const LogbookPage()),
+    );
   }
 
   List<BarChartGroupData> _buildBarChartGroups() {
     final Map<int, int> gradeCounts = {};
+    final Set<String> seenClimbIds = {};
 
     for (final climb in climbsSentStats) {
+      final climbId = climb['climbid'].toString();
+      if (seenClimbIds.contains(climbId)) {
+        continue;
+      }
+      seenClimbIds.add(climbId);
+
       final climbData = climb['climbs'] ?? {};
       final dynamic gradeValue = climbData['grade'];
 
@@ -47,7 +56,6 @@ class _ProfilePageState extends State<ProfilePage> {
       } else {
         continue;
       }
-
       gradeCounts[gradeNum] = (gradeCounts[gradeNum] ?? 0) + 1;
     }
 
@@ -185,7 +193,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("FA Spray Wall"),
+        title: const Text("FA Spray Wall"),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -246,7 +254,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         drawHorizontalLine: false,
                         drawVerticalLine: true,
                         getDrawingVerticalLine: (value) => FlLine(
-                          color: Colors.grey.withOpacity(0.3),
+                          color: Colors.grey.withValues(alpha: 0.3),
                           strokeWidth: 1,
                         ),
                       ),

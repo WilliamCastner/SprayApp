@@ -3,8 +3,8 @@
    Not auth = display sign in / register page
 */
 import 'package:flutter/material.dart';
-import 'package:namer_app/Home.dart';
-import 'package:namer_app/LoginPage.dart';
+import 'package:namer_app/home.dart';
+import 'package:namer_app/login_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthGate extends StatelessWidget {

@@ -62,6 +62,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
     String name,
     String grade,
     List<Map<String, dynamic>> holds,
+    String climbDescription,
   ) async {
     String climbId = generateUuid();
     final user = Supabase.instance.client.auth.currentUser;
@@ -72,6 +73,7 @@ class _ClimbsPageState extends State<ClimbsPage> {
         'id': user?.id, // make sure to get the user's id string
         'name': name,
         'grade': grade,
+        'notes': climbDescription.isEmpty ? null : climbDescription,
       });
     } catch (e) {
       print("Error inserting climbs {$e}");
@@ -263,21 +265,42 @@ class _ClimbsPageState extends State<ClimbsPage> {
                       onPressed: () {
                         if (formKey.currentState!.validate()) {
                           formKey.currentState!.save();
-                          Navigator.pop(context);
                           climbGrade = 'V$_sliderValue';
 
-                          // For now, just print the info and selected holds:
                           final List<Map<String, dynamic>> holdData = [];
+                          bool hasStart = false;
+                          bool hasFinish = false;
 
                           for (int i = 0; i < holdsList.length; i++) {
                             if (selectedHolds.contains(holdsList[i])) {
+                              if (holdsList[i].selected == 3) hasStart = true;
+                              if (holdsList[i].selected == 4) hasFinish = true;
+
                               holdData.add({
                                 'array_index': i,
                                 'holdstate': holdsList[i].selected,
                               });
                             }
                           }
-                          _insertClimbs(climbName, climbGrade, holdData);
+
+                          if (!hasStart || !hasFinish) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please select at least one START and one FINISH hold.',
+                                ),
+                              ),
+                            );
+                            return; // Don’t insert
+                          }
+
+                          Navigator.pop(context);
+                          _insertClimbs(
+                            climbName,
+                            climbGrade,
+                            holdData,
+                            climbDescription,
+                          );
                         }
                       },
                     ),
@@ -313,10 +336,10 @@ class _HtmlMapPainter extends CustomPainter {
 
       final fillPaint = Paint()
         ..color = switch (hold.selected) {
-          1 => Colors.blue.withOpacity(0.5), // Hand
-          2 => Colors.orange.withOpacity(0.5), // Foot
-          3 => Colors.green.withOpacity(0.5), // Start
-          4 => Colors.purple.withOpacity(0.5), // Finish
+          1 => Colors.blue.withValues(alpha: 0.5), // Hand
+          2 => Colors.orange.withValues(alpha: 0.5), // Foot
+          3 => Colors.green.withValues(alpha: 0.5), // Start
+          4 => Colors.purple.withValues(alpha: 0.5), // Finish
           _ => Colors.transparent,
         }
         ..style = PaintingStyle.fill;

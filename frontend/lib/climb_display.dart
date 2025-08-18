@@ -7,10 +7,8 @@ const double originalImageWidth = 5712;
 const double originalImageHeight = 4284;
 
 class ClimbDisplay extends StatefulWidget {
-  // Climb id for database fetching
   final String climbId;
 
-  // Requires climbid to be passed from climbList
   const ClimbDisplay({super.key, required this.climbId});
 
   @override
@@ -21,7 +19,6 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
   int _sliderValue = 0;
   late List<HtmlMapHold> holdsList;
   List<Map<String, dynamic>> holdsArray = [];
-
   bool loading = true;
   String? error;
 
@@ -31,28 +28,33 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
   @override
   void initState() {
     super.initState();
-    _fetchClimbData();
     holdsList = holds;
+    _fetchClimbData();
   }
 
   @override
   void dispose() {
-    // Reset all holds to unselected
     for (final hold in holdsList) {
       hold.selected = 0;
     }
     super.dispose();
   }
 
-  Future<void> _insertSend(int grade) async {
+  Future<void> _insertSend(int grade, String comment, bool flash) async {
     final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
 
     try {
       await Supabase.instance.client.from('climbssent').insert({
         'climbid': widget.climbId,
-        'id': user?.id, // make sure to get the user's id string
+        'id': user.id,
         'grade': grade,
+        'comment': comment.isEmpty ? null : comment,
+        'is_flash': flash,
       });
+
+      if (!mounted) return;
+      setState(() {}); // optional UI refresh
     } catch (e) {
       print("Error inserting send {$e}");
     }
@@ -60,27 +62,26 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
 
   Future<void> _fetchClimbData() async {
     try {
-      // Fetch holds
       final holdsResponse = await Supabase.instance.client
           .from('climbholds')
           .select()
           .eq('climbid', widget.climbId);
+      if (!mounted) return;
 
       final fetchedHolds = List<Map<String, dynamic>>.from(holdsResponse);
 
-      // Fetch climb name & grade
       final climbResponse = await Supabase.instance.client
           .from('climbs')
           .select('name, grade')
           .eq('climbid', widget.climbId)
           .maybeSingle();
+      if (!mounted) return;
 
       if (climbResponse != null) {
         climbName = climbResponse['name'] ?? 'Unnamed Climb';
         climbGrade = climbResponse['grade'] ?? '';
       }
 
-      // Update hold selection states
       for (final holdData in fetchedHolds) {
         final int arrayIndex = holdData['array_index'];
         final int holdState = holdData['holdstate'];
@@ -90,11 +91,13 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         holdsArray = fetchedHolds;
         loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         error = 'Error fetching climb: $e';
         loading = false;
@@ -102,12 +105,15 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
     }
   }
 
-  void _sendForm(BuildContext context) {
+  void _sendForm(BuildContext context, int initialGrade) {
+    _sliderValue = initialGrade;
     final formKey = GlobalKey<FormState>();
+    final commentController = TextEditingController();
+    bool isFlash = false;
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // for keyboard to push sheet up
+      isScrollControlled: true,
       builder: (context) {
         return Padding(
           padding: EdgeInsets.only(
@@ -137,20 +143,35 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                           divisions: 17,
                           label: 'V$_sliderValue',
                           onChanged: (newValue) {
-                            setModalState(() {
-                              _sliderValue = newValue.round();
-                            });
+                            setModalState(
+                              () => _sliderValue = newValue.round(),
+                            );
                           },
                         ),
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: Text('Selected Grade: V$_sliderValue'),
                         ),
+                        CheckboxListTile(
+                          title: const Text("Flash"),
+                          value: isFlash,
+                          onChanged: (val) =>
+                              setModalState(() => isFlash = val ?? false),
+                          controlAffinity: ListTileControlAffinity.leading,
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: commentController,
+                          maxLines: 3,
+                          decoration: const InputDecoration(
+                            labelText: 'Comments (optional)',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
                       ],
                     );
                   },
                 ),
-
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -161,14 +182,16 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                     ),
                     ElevatedButton(
                       child: const Text('Save'),
-                      onPressed: () {
+                      onPressed: () async {
                         if (formKey.currentState!.validate()) {
                           formKey.currentState!.save();
                           Navigator.pop(context);
 
-                          // For now, just print the info and selected holds:
-                          // TODO: send it to database
-                          _insertSend(_sliderValue);
+                          await _insertSend(
+                            _sliderValue,
+                            commentController.text,
+                            isFlash,
+                          );
                         }
                       },
                     ),
@@ -184,29 +207,33 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
 
   void _infoForm(BuildContext context) async {
     try {
-      // Fetch climb creator
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) return;
+
       final creatorResponse = await Supabase.instance.client
           .from('climbs')
           .select('id, grade')
           .eq('climbid', widget.climbId)
           .maybeSingle();
+      if (!mounted) return;
 
       final userResponse = await Supabase.instance.client.auth.getUser();
+      if (!mounted) return;
 
       final displayName =
-          userResponse.user!.userMetadata?['display_name'] ?? 'Unknown';
+          userResponse.user?.userMetadata?['display_name'] ?? 'Unknown';
+      final climbGrade = creatorResponse?['grade'] ?? 'N/A';
+      final creatorId = creatorResponse?['id'];
 
-      String climbGrade = creatorResponse?['grade'] ?? 'N/A';
-
-      // Fetch sends count
       final sendsResponse = await Supabase.instance.client
           .from('climbssent')
           .select()
           .eq('climbid', widget.climbId);
+      if (!mounted) return;
 
-      int sendsCount = sendsResponse.length;
+      final sendsCount = sendsResponse.length;
 
-      // Show bottom sheet
+      if (!mounted) return;
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
@@ -220,8 +247,6 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
-
-                // Creator
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -233,8 +258,6 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                   ],
                 ),
                 const Divider(),
-
-                // Grade
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -246,8 +269,6 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                   ],
                 ),
                 const Divider(),
-
-                // Sends
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -259,8 +280,48 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                   ],
                 ),
                 const Divider(),
-
-                const SizedBox(height: 16),
+                if (creatorId == userId) ...[
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.delete),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    label: const Text('Delete Climb'),
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('Delete Climb'),
+                          content: const Text(
+                            'Are you sure you want to delete this climb? This cannot be undone.',
+                          ),
+                          actions: [
+                            TextButton(
+                              child: const Text('Cancel'),
+                              onPressed: () => Navigator.pop(context, false),
+                            ),
+                            ElevatedButton(
+                              child: const Text('Delete'),
+                              onPressed: () => Navigator.pop(context, true),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (!mounted) return;
+                      if (confirm == true) {
+                        await Supabase.instance.client
+                            .from('climbs')
+                            .delete()
+                            .eq('climbid', widget.climbId);
+                        if (!mounted) return;
+                        Navigator.pop(context);
+                        Navigator.pop(context);
+                      }
+                    },
+                  ),
+                  const Divider(),
+                ],
                 Align(
                   alignment: Alignment.centerRight,
                   child: ElevatedButton(
@@ -274,10 +335,10 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
         },
       );
     } catch (e) {
-      print('Error fetching climb info: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error loading climb info')));
+      ).showSnackBar(const SnackBar(content: Text('Error loading climb info')));
     }
   }
 
@@ -287,91 +348,27 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
 
     return Scaffold(
       appBar: AppBar(
-        automaticallyImplyLeading: true, // keep back button if any
-        title: LayoutBuilder(
-          builder: (context, constraints) {
-            final screenWidth = constraints.maxWidth;
-            final targetRightPos = screenWidth * 0.1;
-            final targetLeftPos = screenWidth * 0.05;
-
-            return Stack(
-              children: [
-                // Title
-                Center(
-                  child: Text(
-                    climbName.isEmpty
-                        ? 'Loading...'
-                        : climbGrade.isEmpty
-                        ? climbName
-                        : '$climbName |  $climbGrade',
-                    style: TextStyle(fontSize: screenWidth / 30),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-
-                // Log button
-                Positioned(
-                  right: targetRightPos,
-                  top: 0,
-                  bottom: 0,
-                  child: TextButton.icon(
-                    onPressed: () => _sendForm(context),
-                    icon: Icon(
-                      Icons.add,
-                      color: Colors.black,
-                      size: screenWidth / 40,
-                    ),
-                    label: Text(
-                      'Log',
-                      style: TextStyle(
-                        color: Colors.black,
-                        fontSize: screenWidth / 40,
-                      ),
-                    ),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
-                  ),
-                ),
-
-                // Info button
-                Positioned(
-                  left: targetLeftPos,
-                  top: 0,
-                  bottom: 0,
-                  child: TextButton.icon(
-                    onPressed: () => _infoForm(context),
-                    icon: Icon(
-                      Icons.info,
-                      color: Colors.black,
-                      size: screenWidth / 40,
-                    ),
-                    label: Text(
-                      'Info',
-                      style: TextStyle(
-                        color: Colors.black,
-                        fontSize: screenWidth / 40,
-                      ),
-                    ),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+        automaticallyImplyLeading: true,
+        title: Text(
+          climbName.isEmpty
+              ? 'Loading...'
+              : climbGrade.isEmpty
+              ? climbName
+              : '$climbName | $climbGrade',
         ),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info),
+            onPressed: () => _infoForm(context),
+          ),
+        ],
       ),
-
       body: LayoutBuilder(
         builder: (context, constraints) {
           final maxWidth = constraints.maxWidth;
           final maxHeight = constraints.maxHeight;
-          final fontScale = constraints.maxWidth / 1500;
+          final fontScale = maxWidth / 1500;
 
           double displayedWidth;
           double displayedHeight;
@@ -398,28 +395,39 @@ class _ClimbDisplayState extends State<ClimbDisplay> {
                       scaleEnabled: true,
                       minScale: 1.0,
                       maxScale: 5.0,
-                      child: GestureDetector(
-                        child: Stack(
-                          children: [
-                            Image.asset(
-                              'assets/spray_wall.jpeg',
-                              width: displayedWidth,
-                              height: displayedHeight,
-                              fit: BoxFit.fill,
+                      child: Stack(
+                        children: [
+                          Image.asset(
+                            'assets/spray_wall.jpeg',
+                            width: displayedWidth,
+                            height: displayedHeight,
+                            fit: BoxFit.fill,
+                          ),
+                          CustomPaint(
+                            size: displayedSize,
+                            painter: _HtmlMapPainter(
+                              holdsList,
+                              displayedWidth / originalImageWidth,
+                              displayedHeight / originalImageHeight,
+                              fontScale,
                             ),
-                            CustomPaint(
-                              size: displayedSize,
-                              painter: _HtmlMapPainter(
-                                holdsList,
-                                displayedWidth / originalImageWidth,
-                                displayedHeight / originalImageHeight,
-                                fontScale,
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      final initialGrade =
+                          int.tryParse(
+                            climbGrade.replaceAll(RegExp(r'[vV]'), ''),
+                          ) ??
+                          0;
+                      _sendForm(context, initialGrade);
+                    },
+                    icon: const Icon(Icons.add),
+                    label: const Text('Log'),
                   ),
                   const SizedBox(height: 24),
                 ],
@@ -448,15 +456,14 @@ class _HtmlMapPainter extends CustomPainter {
       final scaledPoints = hold.points
           .map((p) => Offset(p.dx * scaleX, p.dy * scaleY))
           .toList();
-
       final path = Path()..addPolygon(scaledPoints, true);
 
       final fillPaint = Paint()
         ..color = switch (hold.selected) {
-          1 => Colors.blue.withOpacity(0.5),
-          2 => Colors.orange.withOpacity(0.5),
-          3 => Colors.green.withOpacity(0.5),
-          4 => Colors.purple.withOpacity(0.5),
+          1 => Colors.blue.withValues(alpha: 0.5),
+          2 => Colors.orange.withValues(alpha: 0.5),
+          3 => Colors.green.withValues(alpha: 0.5),
+          4 => Colors.purple.withValues(alpha: 0.5),
           _ => Colors.transparent,
         }
         ..style = PaintingStyle.fill;
@@ -477,7 +484,6 @@ class _HtmlMapPainter extends CustomPainter {
         _ => '',
       };
 
-      // Draw label text in the center of the hold
       if (holdLabel.isNotEmpty) {
         final textPainter = TextPainter(
           text: TextSpan(
@@ -487,7 +493,7 @@ class _HtmlMapPainter extends CustomPainter {
               fontSize: 15 * fontScale,
               fontWeight: FontWeight.bold,
               shadows: [
-                Shadow(
+                const Shadow(
                   blurRadius: 3,
                   color: Colors.black,
                   offset: Offset(1, 1),
@@ -497,10 +503,8 @@ class _HtmlMapPainter extends CustomPainter {
           ),
           textDirection: TextDirection.ltr,
         );
-
         textPainter.layout();
 
-        // Find center of polygon to place text
         final centerX =
             scaledPoints.map((p) => p.dx).reduce((a, b) => a + b) /
             scaledPoints.length;

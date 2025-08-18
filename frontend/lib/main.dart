@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:namer_app/AuthGate.dart';
+import 'package:namer_app/auth_gate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -29,7 +29,7 @@ class MyApp extends StatelessWidget {
           selectedItemColor: Colors.deepOrange,
           unselectedItemColor: Colors.grey,
         ),
-        textTheme: GoogleFonts.urbanistTextTheme(), // cool modern font
+        textTheme: GoogleFonts.playTextTheme(), // cool modern font
       ),
     );
   }

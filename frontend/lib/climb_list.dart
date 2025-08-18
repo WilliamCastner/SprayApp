@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import "ClimbDisplay.dart";
+import "climb_display.dart";
 
 class ClimbList extends StatefulWidget {
   const ClimbList({super.key});
@@ -26,7 +26,10 @@ class _ClimbListState extends State<ClimbList> {
     try {
       final response = await Supabase.instance.client
           .from('climbs')
-          .select('climbid, name, grade, id'); // include creator id
+          .select('climbid, name, grade, id');
+
+      if (!mounted) return; // <-- check widget is still in tree
+
       setState(() {
         allClimbs = List<Map<String, dynamic>>.from(response);
       });
@@ -185,9 +188,26 @@ class _ClimbListState extends State<ClimbList> {
                         ),
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: Colors.deepOrange,
+                            backgroundColor: () {
+                              // default fallback
+                              final gradeStr = climb['grade'] ?? '';
+                              final match = RegExp(
+                                r'V(\d+)',
+                              ).firstMatch(gradeStr.toUpperCase());
+                              final gradeNum = match != null
+                                  ? int.tryParse(match.group(1)!) ?? 0
+                                  : 0;
+
+                              if (gradeNum <= 4) {
+                                return Colors.green;
+                              } else if (gradeNum <= 8) {
+                                return Colors.blue;
+                              }
+                              return Colors.red;
+                            }(),
                             child: Text(climb['grade'] ?? '?'),
                           ),
+
                           title: Text(climb['name'] ?? 'Unnamed Climb'),
                           trailing: const Icon(Icons.arrow_forward_ios),
                           onTap: () {

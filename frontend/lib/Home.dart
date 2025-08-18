@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:namer_app/Profile.dart';
-import 'package:namer_app/ClimbList.dart';
-import 'package:namer_app/Climbs.dart'; // This is assumed to be the climb creation page
+import 'package:namer_app/climb_list.dart';
+import 'package:namer_app/climb_creation.dart'; // This is assumed to be the climb creation page
 
 class HomeWithNav extends StatefulWidget {
   const HomeWithNav({super.key});
@@ -18,8 +18,6 @@ class _HomeWithNavState extends State<HomeWithNav> {
     ClimbList(),
     ClimbsPage(), // assumed to be the create climb page
   ];
-
-  final List<String> _titles = ['Profile', 'Problems', 'New Climb'];
 
   void _onItemTapped(int index) {
     setState(() => _selectedIndex = index);
