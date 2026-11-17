@@ -3,7 +3,9 @@ import 'package:namer_app/auth_service.dart';
 import 'package:namer_app/my_sets.dart';
 import 'package:namer_app/climb_display.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:namer_app/login_page.dart';
+import 'data/climb_feed.dart';
+import 'perf.dart';
+import 'widgets/climb_widgets.dart';
 import 'logbook.dart';
 import 'drafts.dart';
 import 'saved_climbs_page.dart';
@@ -31,6 +33,25 @@ class _ProfilePageState extends State<ProfilePage> {
     _loadUserData();
     _loadRecentActivity();
     _loadLeaderboard();
+    ClimbFeed.instance.changes.addListener(_onFeedChanged);
+  }
+
+  void _onFeedChanged() {
+    if (!mounted) return;
+    _loadRecentActivity();
+    _loadLeaderboard();
+  }
+
+  @override
+  void dispose() {
+    ClimbFeed.instance.changes.removeListener(_onFeedChanged);
+    super.dispose();
+  }
+
+  /// Pull to refresh: reload activity and leaderboard with one new request.
+  Future<void> _refreshFeed() async {
+    ClimbFeed.instance.invalidate();
+    await Future.wait([_loadRecentActivity(force: true), _loadLeaderboard()]);
   }
 
   void logout() async {
@@ -130,25 +151,13 @@ class _ProfilePageState extends State<ProfilePage> {
     await authService.deleteAccount();
 
     if (mounted) {
-      Navigator.of(context).pop(); // Close loading dialog
-      
-      // Navigate to login page and clear all previous routes
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const LoginPage()),
-        (route) => false,
+      final messenger = ScaffoldMessenger.of(context);
+      // Close the loading dialog and anything above the home screen; the
+      // sign-out makes AuthGate show the login page by itself.
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Account deleted")),
       );
-      
-      // Show success message after navigation
-      Future.delayed(const Duration(milliseconds: 100), () {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("✅ Account deleted successfully"),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      });
     }
   } catch (e) {
     debugPrint("Error deleting account: $e");
@@ -165,30 +174,26 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 }
-  Future<void> _loadRecentActivity() async {
+  Future<void> _loadRecentActivity({bool force = false}) async {
     final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      // Not signed in (read-only preview): stop the spinner.
+      if (mounted) setState(() => loadingActivity = false);
+      return;
+    }
 
     final currentUserId = user.id;
 
     try {
       List<Map<String, dynamic>> activities = [];
 
-      final results = await Future.wait([
-        Supabase.instance.client
-            .from('climbs')
-            .select('climbid, name, grade, createdat, displayname, private, id')
-            .or('draft.is.null,draft.eq.false')
-            .order('createdat', ascending: false),
-        Supabase.instance.client
-            .from('climbs')
-            .select('climbid, name, grade, ascents, private, id')
-            .not('ascents', 'is', null)
-            .or('draft.is.null,draft.eq.false'),
-      ]);
-
-      final createdClimbs = List<Map<String, dynamic>>.from(results[0]);
-      final climbsWithAscents = List<Map<String, dynamic>>.from(results[1]);
+      // One shared request for every screen (see ClimbFeed).
+      final published = (await ClimbFeed.instance.climbs(force: force))
+          .where((c) => !c.isDraft)
+          .toList();
+      final createdClimbs = published;
+      final climbsWithAscents =
+          published.where((c) => c['ascents'] != null).toList();
 
       for (final climb in createdClimbs) {
         final isPrivate = climb['private'] == true;
@@ -500,17 +505,8 @@ void _showDeleteAccountDialog() {
     if (user == null) return;
 
     try {
-      // Update profiles table
-      await Supabase.instance.client.from('profiles').upsert({
-        'id': user.id,
-        'display_name': newName,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-
-      // Update auth user metadata
-      await Supabase.instance.client.auth.updateUser(
-        UserAttributes(data: {'display_name': newName}),
-      );
+      await authService.renameUser(newName);
+      ClimbFeed.instance.invalidate();
 
       setState(() => username = newName);
 
@@ -704,28 +700,13 @@ ListTile(
 
   Future<void> _loadLeaderboard() async {
     try {
-      final results = await Future.wait([
-        Supabase.instance.client
-            .from('climbs')
-            .select('id, displayname, draft'),
-        Supabase.instance.client
-            .from('climbs')
-            .select('ascents, grade')
-            .not('ascents', 'is', null),
-      ]);
+      final all = await ClimbFeed.instance.climbs();
 
-      List<Map<String, dynamic>> likedRows = [];
-      try {
-        final likedResult = await Supabase.instance.client
-            .from('liked_climbs')
-            .select('setter_name');
-        likedRows = List<Map<String, dynamic>>.from(likedResult);
-      } catch (e) {
-        debugPrint('liked_climbs query failed: $e');
-      }
+      // Fetched together with the climbs (one round trip) and cached.
+      final likedNames = await ClimbFeed.instance.setterLikes();
 
-      final climbsForSetters = List<Map<String, dynamic>>.from(results[0]);
-      final climbsForSends = List<Map<String, dynamic>>.from(results[1]);
+      final climbsForSetters = all;
+      final climbsForSends = all.where((c) => c['ascents'] != null).toList();
 
       // climb count per setter (non-drafts only)
       final setterClimbCounts = <String, int>{};
@@ -739,8 +720,7 @@ ListTile(
 
       // likes per setter — read directly from stored setter_name
       final setterLikeCounts = <String, int>{};
-      for (final like in likedRows) {
-        final setter = like['setter_name']?.toString() ?? '';
+      for (final setter in likedNames) {
         if (setter.isNotEmpty) {
           setterLikeCounts[setter] = (setterLikeCounts[setter] ?? 0) + 1;
         }
@@ -800,6 +780,7 @@ ListTile(
         sendLeaderboard = sendEntries;
         leaderboardLoading = false;
       });
+      Perf.mark('profile-loaded');
     } catch (e, st) {
       debugPrint('Error loading leaderboard: $e\n$st');
       if (mounted) setState(() => leaderboardLoading = false);
@@ -1096,7 +1077,10 @@ ListTile(
             ),
             const Divider(height: 1, thickness: 1),
             Expanded(
-              child: SingleChildScrollView(
+              child: RefreshIndicator(
+                onRefresh: _refreshFeed,
+                child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1239,6 +1223,7 @@ ListTile(
                   ],
                 ),
               ),
+              ),
             ),
           ],
         ),
@@ -1281,20 +1266,11 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   Future<void> _fetchData() async {
     try {
-      final results = await Future.wait([
-        Supabase.instance.client
-            .from('climbs')
-            .select('climbid')
-            .eq('displayname', widget.displayName)
-            .or('draft.is.null,draft.eq.false'),
-        Supabase.instance.client
-            .from('climbs')
-            .select('name, grade, ascents')
-            .not('ascents', 'is', null),
-      ]);
-
-      final sets = results[0] as List;
-      final climbsWithAscents = List<Map<String, dynamic>>.from(results[1]);
+      final all = await ClimbFeed.instance.climbs();
+      final sets = all
+          .where((c) => c['displayname'] == widget.displayName && !c.isDraft)
+          .toList();
+      final climbsWithAscents = all.where((c) => c['ascents'] != null).toList();
 
       final logs = <Map<String, dynamic>>[];
       int maxSend = 0;
@@ -1309,6 +1285,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
           if (ascent['username'] != widget.displayName) continue;
           final isFlash = (ascent['is_flash'] ?? false) || (ascent['attempts'] as int?) == 1;
           logs.add({
+            'climbid': climb['climbid'].toString(),
             'climb_name': climb['name'] ?? 'Unnamed',
             'grade': gradeStr ?? '',
             'grade_num': gradeNum,
@@ -1337,96 +1314,104 @@ class _UserProfilePageState extends State<UserProfilePage> {
     }
   }
 
-  Widget _buildStatCard(String title, String value) {
-    return Column(
-      children: [
-        Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        Text(title, style: const TextStyle(color: Colors.grey)),
-      ],
+  Widget _stat(String label, String value) {
+    return Expanded(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            children: [
+              Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 2),
+              Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Same layout as your own Logbook: stats, then sends.
+    final climbIds = <String>[];
+    for (final log in sendLogs) {
+      final id = log['climbid']?.toString() ?? '';
+      if (id.isNotEmpty && !climbIds.contains(id)) climbIds.add(id);
+    }
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.displayName),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: Text(widget.displayName)),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                      'Problems set by ${widget.displayName} — $setCount',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => UserSetsPage(displayName: widget.displayName),
+          : ListView(
+              padding: const EdgeInsets.only(bottom: 16),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: Row(
+                    children: [
+                      _stat('Sends', totalSends.toString()),
+                      const SizedBox(width: 8),
+                      _stat('Hardest', _formatGrade(hardestSendGrade)),
+                      const SizedBox(width: 8),
+                      _stat('Best flash', _formatGrade(hardestFlashGrade)),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: ListTile(
+                      leading: const Icon(Icons.construction),
+                      title: Text('Climbs set  ·  $setCount'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => UserSetsPage(displayName: widget.displayName),
+                        ),
                       ),
                     ),
                   ),
-                  const Divider(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _buildStatCard('Total Sends', totalSends.toString()),
-                      _buildStatCard('Hardest Send', _formatGrade(hardestSendGrade)),
-                      _buildStatCard('Hardest Flash', _formatGrade(hardestFlashGrade)),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Send History',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const Divider(),
-                  Expanded(
-                    child: sendLogs.isEmpty
-                        ? const Center(child: Text('No sends logged yet.'))
-                        : ListView.builder(
-                            itemCount: sendLogs.length,
-                            itemBuilder: (context, index) {
-                              final send = sendLogs[index];
-                              final gradeNum = send['grade_num'] as int;
-                              return ListTile(
-                                leading: CircleAvatar(
-                                  backgroundColor: gradeNum <= 4
-                                      ? Colors.green
-                                      : gradeNum <= 8
-                                          ? Colors.blue
-                                          : Colors.red,
-                                  child: Text(
-                                    send['grade'].isEmpty ? '?' : send['grade'],
-                                    style: const TextStyle(color: Colors.white),
+                ),
+                if (sendLogs.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'No sends yet.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey.shade500),
+                    ),
+                  )
+                else
+                  for (final send in sendLogs)
+                    ClimbTile(
+                      grade: (send['grade'] as String?)?.isNotEmpty == true ? send['grade'] as String : '?',
+                      name: send['climb_name'] ?? '',
+                      details: [
+                        send['is_flash'] == true ? 'Flash' : 'Send',
+                        timeAgo(send['timestamp']?.toString()),
+                      ],
+                      onTap: send['climbid'] == null
+                          ? null
+                          : () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ClimbDisplay(
+                                    climbId: send['climbid'],
+                                    climbIds: climbIds,
+                                    currentIndex: climbIds.indexOf(send['climbid']),
                                   ),
                                 ),
-                                title: Text(send['climb_name']),
-                                subtitle: Text(send['is_flash'] == true ? 'Flash' : 'Send'),
-                                // is_flash already accounts for 1-attempt sends
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
+                              ),
+                    ),
+              ],
             ),
     );
   }
 }
 
-/// -------------------------
-/// USER SETS PAGE
-/// -------------------------
 class UserSetsPage extends StatefulWidget {
   final String displayName;
   const UserSetsPage({super.key, required this.displayName});
@@ -1447,15 +1432,13 @@ class _UserSetsPageState extends State<UserSetsPage> {
 
   Future<void> _fetchSets() async {
     try {
-      final response = await Supabase.instance.client
-          .from('climbs')
-          .select('climbid, name, grade, sends, ascents')
-          .eq('displayname', widget.displayName)
-          .or('draft.is.null,draft.eq.false')
-          .order('createdat', ascending: false);
+      final me = Supabase.instance.client.auth.currentUser?.id;
+      final rows = await ClimbFeed.instance.climbs();
       if (!mounted) return;
       setState(() {
-        climbs = List<Map<String, dynamic>>.from(response);
+        climbs = rows
+            .where((c) => c['displayname'] == widget.displayName && c.visibleTo(me))
+            .toList();
         loading = false;
       });
     } catch (e) {
@@ -1474,55 +1457,29 @@ class _UserSetsPageState extends State<UserSetsPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : climbs.isEmpty
-              ? const Center(child: Text('No climbs set yet.'))
+              ? const EmptyState(icon: Icons.construction, message: 'No climbs set yet.')
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: climbs.length,
                   itemBuilder: (context, index) {
                     final climb = climbs[index];
-                    final gradeStr = climb['grade'] ?? '?';
-                    final match = RegExp(r'V(\d+)').firstMatch(gradeStr.toUpperCase());
-                    final gradeNum = match != null ? int.tryParse(match.group(1)!) ?? 0 : 0;
-                    final sendCount = ((climb['ascents'] as List<dynamic>?) ?? []).length;
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 6),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: gradeNum >= 9
-                              ? Colors.red
-                              : gradeNum >= 7
-                                  ? Colors.orange
-                                  : gradeNum >= 4
-                                      ? Colors.blue
-                                      : gradeNum >= 3
-                                          ? Colors.green
-                                          : Colors.yellow.shade700,
-                          child: Text(gradeStr, style: const TextStyle(fontSize: 12)),
-                        ),
-                        title: Text(
-                          climb['name'] ?? 'Unnamed',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text('$sendCount sends'),
-                        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                        onTap: () {
-                          final ids = climbs
-                              .map((c) => c['climbid'].toString())
-                              .toList();
-                          final idx = ids.indexOf(climb['climbid'].toString());
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ClimbDisplay(
-                                climbId: climb['climbid'],
-                                climbIds: ids,
-                                currentIndex: idx < 0 ? 0 : idx,
-                              ),
+                    return ClimbTile(
+                      grade: displayGrade(climb),
+                      name: climb['name'] ?? '',
+                      details: [sendsLabel(sendCount(climb))],
+                      onTap: () {
+                        final ids = climbs.map((c) => c['climbid'].toString()).toList();
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ClimbDisplay(
+                              climbId: climb['climbid'],
+                              climbIds: ids,
+                              currentIndex: index,
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
@@ -1570,7 +1527,7 @@ class _AllActivityPageState extends State<AllActivityPage> {
     );
   }
 
-  Future<void> _loadAllActivity() async {
+  Future<void> _loadAllActivity({bool force = false}) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
@@ -1579,21 +1536,13 @@ class _AllActivityPageState extends State<AllActivityPage> {
     try {
       List<Map<String, dynamic>> activities = [];
 
-      final results = await Future.wait([
-        Supabase.instance.client
-            .from('climbs')
-            .select('climbid, name, grade, createdat, displayname, private, id')
-            .or('draft.is.null,draft.eq.false')
-            .order('createdat', ascending: false),
-        Supabase.instance.client
-            .from('climbs')
-            .select('climbid, name, grade, ascents, private, id')
-            .not('ascents', 'is', null)
-            .or('draft.is.null,draft.eq.false'),
-      ]);
-
-      final createdClimbs = List<Map<String, dynamic>>.from(results[0]);
-      final climbsWithAscents = List<Map<String, dynamic>>.from(results[1]);
+      // One shared request for every screen (see ClimbFeed).
+      final published = (await ClimbFeed.instance.climbs(force: force))
+          .where((c) => !c.isDraft)
+          .toList();
+      final createdClimbs = published;
+      final climbsWithAscents =
+          published.where((c) => c['ascents'] != null).toList();
 
       for (final climb in createdClimbs) {
         final isPrivate = climb['private'] == true;

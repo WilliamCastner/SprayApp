@@ -8,6 +8,7 @@ import 'package:namer_app/home.dart';
 import 'package:namer_app/login_page.dart';
 import 'package:namer_app/reset_password_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:namer_app/data/climb_feed.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -27,6 +28,12 @@ class _AuthGateState extends State<AuthGate> {
     _session = Supabase.instance.client.auth.currentSession;
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((state) {
       if (!mounted) return;
+      // A different user may now be signed in: drop cached climbs.
+      if (state.event == AuthChangeEvent.signedOut) {
+        ClimbFeed.instance.clear();
+      } else if (state.event == AuthChangeEvent.signedIn) {
+        ClimbFeed.instance.invalidate();
+      }
       setState(() {
         _session = state.session;
         if (state.event == AuthChangeEvent.passwordRecovery) {

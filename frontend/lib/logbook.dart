@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'data/climb_feed.dart';
+import 'widgets/climb_widgets.dart';
 import 'climb_display.dart';
 
 class LogbookPage extends StatefulWidget {
@@ -28,15 +30,13 @@ class _LogbookPageState extends State<LogbookPage> {
     return int.tryParse(grade.toUpperCase().replaceAll('V', '')) ?? 0;
   }
 
-  Future<void> _fetchUserLogbook() async {
+  Future<void> _fetchUserLogbook({bool force = false}) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
     try {
-      final response = await Supabase.instance.client
-          .from('climbs')
-          .select('climbid, name, grade, ascents')
-          .not('ascents', 'is', null);
+      final response = (await ClimbFeed.instance.climbs(force: force))
+          .where((c) => c['ascents'] != null);
 
       final List<Map<String, dynamic>> logs = [];
       int maxSend = 0;
@@ -122,7 +122,8 @@ class _LogbookPageState extends State<LogbookPage> {
           .update({'ascents': currentAscents, 'sends': uniqueSends})
           .eq('climbid', climbId);
 
-      await _fetchUserLogbook();
+      ClimbFeed.instance.invalidate();
+      await _fetchUserLogbook(force: true);
     } catch (e) {
       debugPrint('Error deleting log: $e');
       if (mounted) {
@@ -172,7 +173,8 @@ class _LogbookPageState extends State<LogbookPage> {
           .update({'ascents': currentAscents})
           .eq('climbid', climbId);
 
-      await _fetchUserLogbook();
+      ClimbFeed.instance.invalidate();
+      await _fetchUserLogbook(force: true);
     } catch (e) {
       debugPrint('Error updating log: $e');
       if (mounted) {
@@ -303,13 +305,7 @@ class _LogbookPageState extends State<LogbookPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    // Build deduplicated ordered climbId list for arrow navigation
+    // Deduplicated, ordered climb ids for the arrows on the climb page.
     final climbIds = <String>[];
     for (final log in sendLogs) {
       final id = log['climbid'] as String;
@@ -317,93 +313,83 @@ class _LogbookPageState extends State<LogbookPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text("My Logbook")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // STATS
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildStatCard("Total Sends", totalSends.toString()),
-                _buildStatCard(
-                    "Hardest Send", _formatGrade(hardestSendGrade)),
-                _buildStatCard(
-                    "Hardest Flash", _formatGrade(hardestFlashGrade)),
-              ],
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              "Send History",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const Divider(),
-            Expanded(
-              child: sendLogs.isEmpty
-                  ? const Center(child: Text("No sends logged yet."))
-                  : ListView.builder(
-                      itemCount: sendLogs.length,
-                      itemBuilder: (context, index) {
-                        final send = sendLogs[index];
-                        final gradeNum = send['grade_num'] as int;
-                        final climbId = send['climbid'] as String;
-                        final navIndex = climbIds.indexOf(climbId);
+      appBar: AppBar(title: const Text('Logbook')),
+      body: SafeArea(
+        child: loading
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: () => _fetchUserLogbook(force: true),
+                child: sendLogs.isEmpty
+                    ? const EmptyState(
+                        icon: Icons.menu_book_outlined,
+                        message: 'No sends yet.\nTap "Log Ascent" on a climb after you send it.',
+                      )
+                    : ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.only(bottom: 16),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                            child: Row(
+                              children: [
+                                _stat('Sends', totalSends.toString()),
+                                const SizedBox(width: 8),
+                                _stat('Hardest', _formatGrade(hardestSendGrade)),
+                                const SizedBox(width: 8),
+                                _stat('Best flash', _formatGrade(hardestFlashGrade)),
+                              ],
+                            ),
+                          ),
+                          for (int index = 0; index < sendLogs.length; index++)
+                            _logTile(index, climbIds),
+                        ],
+                      ),
+              ),
+      ),
+    );
+  }
 
-                        return ListTile(
-                          onTap: () => Navigator.push(
-                            context,
-                            PageRouteBuilder(
-                              pageBuilder: (_, __, ___) => ClimbDisplay(
-                                climbId: climbId,
-                                climbIds: climbIds,
-                                currentIndex: navIndex,
-                              ),
-                              transitionDuration: Duration.zero,
-                              reverseTransitionDuration: Duration.zero,
-                              transitionsBuilder: (_, __, ___, child) => child,
-                            ),
-                          ),
-                          leading: CircleAvatar(
-                            backgroundColor: gradeNum <= 4
-                                ? Colors.green
-                                : gradeNum <= 8
-                                    ? Colors.blue
-                                    : Colors.red,
-                            child: Text(
-                              send['grade'] as String,
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                          title: Text(send['climb_name'] as String),
-                          subtitle: Text(_subtitleText(send)),
-                          contentPadding: const EdgeInsets.only(left: 16, right: 0),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined, size: 20),
-                                color: Colors.grey,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () => _showEditSheet(index),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 20),
-                                color: Colors.grey,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () => _confirmDelete(index),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
+  Widget _logTile(int index, List<String> climbIds) {
+    final send = sendLogs[index];
+    final climbId = send['climbid'] as String;
+    return ClimbTile(
+      grade: (send['grade'] as String?)?.isNotEmpty == true ? send['grade'] as String : '?',
+      name: send['climb_name'] as String,
+      details: [_subtitleText(send), timeAgo(send['timestamp']?.toString())],
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClimbDisplay(
+            climbId: climbId,
+            climbIds: climbIds,
+            currentIndex: climbIds.indexOf(climbId),
+          ),
+        ),
+      ),
+      trailing: PopupMenuButton<String>(
+        icon: Icon(Icons.more_horiz, color: Colors.grey.shade500),
+        tooltip: 'Edit or delete',
+        onSelected: (v) => v == 'edit' ? _showEditSheet(index) : _confirmDelete(index),
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'edit', child: Text('Edit send')),
+          PopupMenuItem(value: 'delete', child: Text('Delete send')),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(String label, String value) {
+    return Expanded(
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            children: [
+              Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 2),
+              Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+            ],
+          ),
         ),
       ),
     );
@@ -431,16 +417,4 @@ class _LogbookPageState extends State<LogbookPage> {
     if (confirmed == true) _deleteLog(index);
   }
 
-  Widget _buildStatCard(String title, String value) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
-        Text(title, style: const TextStyle(color: Colors.grey)),
-      ],
-    );
-  }
 }

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'climb_display.dart';
 
+import 'climb_display.dart';
+import 'data/climb_feed.dart';
+import 'widgets/climb_widgets.dart';
+
+/// Climbs you bookmarked, newest save first.
 class SavedClimbsPage extends StatefulWidget {
   const SavedClimbsPage({super.key});
 
@@ -16,126 +20,92 @@ class _SavedClimbsPageState extends State<SavedClimbsPage> {
   @override
   void initState() {
     super.initState();
-    _fetchSaved();
+    _load();
+    ClimbFeed.instance.changes.addListener(_load);
   }
 
-  Future<void> _fetchSaved() async {
+  @override
+  void dispose() {
+    ClimbFeed.instance.changes.removeListener(_load);
+    super.dispose();
+  }
+
+  Future<void> _load({bool force = false}) async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
-
-    setState(() => _isLoading = true);
-
     try {
-      final response = await Supabase.instance.client
-          .from('saved_climbs')
-          .select('climbid, saved_at, climbs(name, grade, displayname)')
-          .eq('user_id', userId)
-          .order('saved_at', ascending: false);
-
+      // Only the ids come from saved_climbs; climb details come from the
+      // shared cache, so the list matches the rest of the app.
+      final results = await Future.wait([
+        Supabase.instance.client
+            .from('saved_climbs')
+            .select('climbid')
+            .eq('user_id', userId)
+            .order('saved_at', ascending: false),
+        ClimbFeed.instance.climbs(force: force),
+      ]);
+      final ids = [for (final r in results[0] as List) r['climbid'].toString()];
       if (!mounted) return;
       setState(() {
-        _savedClimbs = List<Map<String, dynamic>>.from(response);
+        _savedClimbs = [
+          for (final id in ids)
+            if (ClimbFeed.instance.cachedClimb(id) case final c?)
+              if (!c.isDraft) c,
+        ];
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint('Error fetching saved climbs: $e');
+      debugPrint('Error loading saved climbs: $e');
       if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  Color _gradeColor(String grade) {
-    final match = RegExp(r'V(\d+)').firstMatch(grade.toUpperCase());
-    final n = match != null ? int.tryParse(match.group(1)!) ?? 0 : 0;
-    if (n >= 9) return Colors.red;
-    if (n >= 7) return Colors.orange;
-    if (n >= 4) return Colors.blue;
-    if (n >= 3) return Colors.green;
-    return Colors.yellow.shade700;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Saved Climbs'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Saved')),
       body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _savedClimbs.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.bookmark_outline,
-                            size: 48, color: Colors.grey),
-                        SizedBox(height: 12),
-                        Text(
-                          'No saved climbs yet.',
-                          style: TextStyle(color: Colors.grey, fontSize: 16),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _savedClimbs.length,
-                    itemBuilder: (context, index) {
-                      final row = _savedClimbs[index];
-                      final climb =
-                          row['climbs'] as Map<String, dynamic>? ?? {};
-                      final grade = climb['grade'] ?? '';
-                      final name = climb['name'] ?? 'Unnamed Climb';
-                      final setBy = climb['displayname'] ?? '';
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: _gradeColor(grade),
-                            child: Text(
-                              grade.isNotEmpty ? grade : '?',
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 11),
-                            ),
-                          ),
-                          title: Text(
-                            name,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          subtitle: setBy.isNotEmpty
-                              ? Text(
-                                  'Set by: $setBy',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade600),
-                                )
-                              : null,
-                          trailing: const Icon(Icons.arrow_forward_ios,
-                              size: 16),
+        child: RefreshIndicator(
+          onRefresh: () => _load(force: true),
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _savedClimbs.isEmpty
+                  ? const EmptyState(
+                      icon: Icons.bookmark_outline,
+                      message: 'Nothing saved yet.\nTap the bookmark on a climb to keep it here.',
+                    )
+                  : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _savedClimbs.length,
+                      itemBuilder: (context, index) {
+                        final climb = _savedClimbs[index];
+                        return ClimbTile(
+                          grade: displayGrade(climb),
+                          name: climb['name'] ?? '',
+                          isPrivate: climb.isPrivate,
+                          details: [
+                            (climb['displayname'] ?? '').toString(),
+                            sendsLabel(sendCount(climb)),
+                          ],
                           onTap: () async {
-                            final ids = _savedClimbs
-                                .map((c) => c['climbid'].toString())
-                                .toList();
-                            final idx = ids.indexOf(row['climbid'].toString());
+                            final ids = _savedClimbs.map((c) => c['climbid'].toString()).toList();
                             await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => ClimbDisplay(
-                                  climbId: row['climbid'],
+                                  climbId: climb['climbid'],
                                   climbIds: ids,
-                                  currentIndex: idx < 0 ? 0 : idx,
+                                  currentIndex: index,
                                 ),
                               ),
                             );
-                            _fetchSaved();
+                            _load(); // a climb may have been unsaved
                           },
-                        ),
-                      );
-                    },
-                  ),
+                        );
+                      },
+                    ),
+        ),
       ),
     );
   }
