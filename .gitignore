@@ -71,3 +71,17 @@ DerivedData/
 *.log
 *.tmp
 *.DS_Store
+
+# =============== Hold detection tools ===============
+.venv-tools/
+tools/work/*
+!tools/work/reject_polys.json
+!tools/work/manual_holds.json
+!tools/work/forced_points.json
+!tools/work/forced_big_points.json
+!tools/work/extra_points.json
+!tools/work/holds_v2.json
+frontend/build/
+
+# Local data backups (personal data, never commit)
+backups/

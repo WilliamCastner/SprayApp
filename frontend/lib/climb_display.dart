@@ -1,13 +1,12 @@
-import 'holds.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'data/climb_feed.dart';
 import 'climb_update.dart';
-import 'Profile.dart';
+import 'profile.dart';
 import 'beta_videos_tab.dart';
-
-// Original image width x height in pixels
-const double originalImageWidth = 5712;
-const double originalImageHeight = 4284;
+import 'wall/climb_holds.dart';
+import 'perf.dart';
+import 'wall/wall_view.dart';
 
 class ClimbDisplay extends StatefulWidget {
   final String climbId;
@@ -27,7 +26,7 @@ class ClimbDisplay extends StatefulWidget {
 
 class _ClimbDisplayState extends State<ClimbDisplay>
     with TickerProviderStateMixin {
-  late List<HtmlMapHold> holdsList;
+  ClimbHolds _holds = ClimbHolds(1);
   late TabController _tabController;
   List<Map<String, dynamic>> ascents = [];
   List<Map<String, dynamic>> comments = [];
@@ -48,7 +47,6 @@ class _ClimbDisplayState extends State<ClimbDisplay>
   @override
   void initState() {
     super.initState();
-    holdsList = holds.map((h) => HtmlMapHold(h.points)).toList();
     _tabController = TabController(length: 2, vsync: this);
     _fetchClimbData();
     _checkIfSaved();
@@ -125,10 +123,6 @@ class _ClimbDisplayState extends State<ClimbDisplay>
   @override
   void dispose() {
     _tabController.dispose();
-
-    for (final hold in holdsList) {
-      hold.selected = 0;
-    }
     super.dispose();
   }
 
@@ -193,30 +187,8 @@ class _ClimbDisplayState extends State<ClimbDisplay>
         'timestamp': DateTime.now().toIso8601String(),
       };
 
-      // Fetch current ascents from the climb
-      final climbResponse = await Supabase.instance.client
-          .from('climbs')
-          .select('ascents')
-          .eq('climbid', widget.climbId)
-          .maybeSingle();
-
-      // Get existing ascents or create empty list
-      List<dynamic> currentAscents = [];
-      if (climbResponse != null && climbResponse['ascents'] != null) {
-        currentAscents = List<dynamic>.from(climbResponse['ascents']);
-      }
-
-      // Add the new ascent
-      currentAscents.add(newAscent);
-
-      // sends = number of unique users who have sent this climb
-      final uniqueSends = currentAscents.map((a) => a['user_id']).toSet().length;
-
-      // Update the climbs table with the new ascents array and send count
-      await Supabase.instance.client
-          .from('climbs')
-          .update({'ascents': currentAscents, 'sends': uniqueSends})
-          .eq('climbid', widget.climbId);
+      await _appendAscent(newAscent);
+      ClimbFeed.instance.invalidate();
 
       await _fetchAscents();
 
@@ -240,6 +212,40 @@ class _ClimbDisplayState extends State<ClimbDisplay>
         );
       }
     }
+  }
+
+  /// Add a send to this climb.
+  ///
+  /// Uses the database function `log_ascent`, which appends in one step so
+  /// two people logging at the same moment can't overwrite each other. If the
+  /// function isn't installed (see supabase/migrations), falls back to the
+  /// old read-then-write update.
+  Future<void> _appendAscent(Map<String, dynamic> ascent) async {
+    final client = Supabase.instance.client;
+    try {
+      await client.rpc('log_ascent', params: {
+        'p_climbid': widget.climbId,
+        'p_ascent': ascent,
+      });
+      return;
+    } on PostgrestException catch (e) {
+      // PGRST202: function not found. Anything else is a real error.
+      if (e.code != 'PGRST202' && e.code != '42883') rethrow;
+    }
+
+    final climbResponse = await client
+        .from('climbs')
+        .select('ascents')
+        .eq('climbid', widget.climbId)
+        .maybeSingle();
+    final currentAscents = List<dynamic>.from(climbResponse?['ascents'] ?? []);
+    currentAscents.add(ascent);
+    // sends = number of unique users who have sent this climb
+    final uniqueSends = currentAscents.map((a) => a['user_id']).toSet().length;
+    await client
+        .from('climbs')
+        .update({'ascents': currentAscents, 'sends': uniqueSends})
+        .eq('climbid', widget.climbId);
   }
 
   Future<void> _fetchAscents() async {
@@ -273,61 +279,55 @@ class _ClimbDisplayState extends State<ClimbDisplay>
     }
   }
 
+  /// Fill the page from one climb row (from the cache or the network).
+  void _applyClimbRow(Map<String, dynamic> row) {
+    climbName = row['name'] ?? 'Unnamed Climb';
+    climbGrade = row['grade'] ?? '';
+    displayName = row['displayname'] ?? '';
+    notes = row['notes'] ?? '';
+    createdByDisplayName = row['displayname'] ?? '';
+    isPrivate = row['private'] == true;
+
+    // Match on the user id, not the display name: two climbers can share a name.
+    final user = Supabase.instance.client.auth.currentUser;
+    final setterId = row['id'];
+    isCurrentUserCreator = setterId != null
+        ? setterId == user?.id
+        : (user?.userMetadata?['display_name'] ?? 'Unknown') == createdByDisplayName;
+
+    _holds = ClimbHolds.fromJson(row['holds']);
+
+    final ascentsData = List<dynamic>.from(row['ascents'] ?? const []);
+    ascentsData.sort((a, b) =>
+        (b['timestamp'] ?? '').toString().compareTo((a['timestamp'] ?? '').toString()));
+    ascents = List<Map<String, dynamic>>.from(ascentsData);
+  }
+
   Future<void> _fetchClimbData() async {
+    // Draw at once from the shared cache (it includes holds), then refresh.
+    final cached = ClimbFeed.instance.cachedClimb(widget.climbId);
+    if (cached != null && cached['holds'] != null) {
+      // Runs inside initState, before the first build: no setState needed.
+      _applyClimbRow(cached);
+      loading = false;
+      Perf.mark('climb-data-loaded');
+    }
+
     try {
-      // Fetch climb data including holds JSONB column and private field
       final climbResponse = await Supabase.instance.client
           .from('climbs')
-          .select('name, grade, holds, displayname, notes, private, ascents')
+          .select('id, name, grade, holds, displayname, notes, private, ascents')
           .eq('climbid', widget.climbId)
           .maybeSingle();
-
-      if (climbResponse != null) {
-        climbName = climbResponse['name'] ?? 'Unnamed Climb';
-        climbGrade = climbResponse['grade'] ?? '';
-        displayName = climbResponse['displayname'] ?? '';
-        notes = climbResponse['notes'] ?? '';
-        createdByDisplayName = climbResponse['displayname'] ?? '';
-        isPrivate = climbResponse['private'] == true;
-
-        final user = Supabase.instance.client.auth.currentUser;
-        final currentDisplayName = user?.userMetadata?['display_name'] ?? 'Unknown';
-        isCurrentUserCreator = currentDisplayName == createdByDisplayName;
-
-        // Parse holds from JSONB
-        final holdsJson = climbResponse['holds'];
-        if (holdsJson != null) {
-          final List<dynamic> holdsList = holdsJson is List ? holdsJson : [];
-          for (final holdData in holdsList) {
-            final int arrayIndex = holdData['array_index'] ?? -1;
-            final int holdState = holdData['holdstate'] ?? 0;
-            if (arrayIndex >= 0 && arrayIndex < this.holdsList.length) {
-              this.holdsList[arrayIndex].selected = holdState;
-            }
-          }
-        }
-
-        // Parse ascents inline — no second network call needed
-        final ascentsJson = climbResponse['ascents'];
-        if (ascentsJson != null) {
-          final List<dynamic> ascentsData = List<dynamic>.from(ascentsJson);
-          ascentsData.sort((a, b) {
-            final timestampA = a['timestamp'] ?? '';
-            final timestampB = b['timestamp'] ?? '';
-            return timestampB.compareTo(timestampA);
-          });
-          ascents = List<Map<String, dynamic>>.from(ascentsData);
-        } else {
-          ascents = [];
-        }
-      }
-
-      setState(() {
-        loading = false;
-      });
+      if (!mounted) return;
+      if (climbResponse != null) _applyClimbRow(climbResponse);
+      setState(() => loading = false);
+      Perf.mark('climb-data-loaded');
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        error = 'Error fetching climb: $e';
+        // Keep showing the cached climb if the refresh failed.
+        if (cached == null) error = 'Error fetching climb: $e';
         loading = false;
       });
     }
@@ -341,6 +341,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
           .from('climbs')
           .update({'private': newPrivateStatus})
           .eq('climbid', widget.climbId);
+      ClimbFeed.instance.invalidate();
 
       setState(() {
         isPrivate = newPrivateStatus;
@@ -508,15 +509,25 @@ class _ClimbDisplayState extends State<ClimbDisplay>
     builder: (context) {
       return AlertDialog(
         title: const Text('Hold Info'),
-        content: const Column(
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Must have at least 1 start and 1 finish hold.\n'),
-            Text('blue = hand'),
-            Text('orange = foot'),
-            Text('green = start'),
-            Text('purple = finish'),
+            for (final r in const [HoldRole.start, HoldRole.hand, HoldRole.foot, HoldRole.finish])
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(color: holdRoleColor(r), shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(holdRoleLabel(r)),
+                ]),
+              ),
+            const SizedBox(height: 12),
+            const Text('Pinch to zoom in on the holds.'),
           ],
         ),
         actions: [
@@ -566,6 +577,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
           .from('climbs')
           .delete()
           .eq('climbid', widget.climbId);
+      ClimbFeed.instance.invalidate();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -616,6 +628,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
           .from('climbs')
           .update({'ascents': currentAscents, 'sends': uniqueSends})
           .eq('climbid', widget.climbId);
+      ClimbFeed.instance.invalidate();
 
       await _fetchAscents();
     } catch (e) {
@@ -746,7 +759,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
 
   @override
   Widget build(BuildContext context) {
-    final imageAspectRatio = originalImageWidth / originalImageHeight;
+    final imageAspectRatio = _holds.wall.aspectRatio;
     final grade = _gradeLabel;
 
     return Scaffold(
@@ -863,9 +876,6 @@ class _ClimbDisplayState extends State<ClimbDisplay>
                         displayedWidth = displayedHeight * imageAspectRatio;
                       }
 
-                      final scaleX = displayedWidth / originalImageWidth;
-                      final scaleY = displayedHeight / originalImageHeight;
-                      final fontScale = displayedWidth / 1500;
 
                       return Column(
                         children: [
@@ -878,49 +888,13 @@ class _ClimbDisplayState extends State<ClimbDisplay>
                               mainAxisAlignment: MainAxisAlignment.start,
                               children: [
                                 const SizedBox(height: 8),
-                                Center(
-                                  child: InteractiveViewer(
-                                    panEnabled: true,
-                                    scaleEnabled: true,
-                                    minScale: 1.0,
-                                    maxScale: 5.0,
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        ColorFiltered(
-                                          colorFilter: const ColorFilter.matrix([
-                                            1.0722, -0.429, -0.0432, 0, -25.5,
-                                            -0.1278, 0.771, -0.0432, 0, -25.5,
-                                            -0.1278, -0.429, 1.1568, 0, -25.5,
-                                            0, 0, 0, 1, 0,
-                                          ]),
-                                          child: Image.asset(
-                                            'assets/spray_wall.jpeg',
-                                            width: displayedWidth,
-                                            height: displayedHeight,
-                                            fit: BoxFit.contain,
-                                            frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                                              if (wasSynchronouslyLoaded || frame != null) return child;
-                                              return SizedBox(
-                                                width: displayedWidth,
-                                                height: displayedHeight,
-                                                child: const Center(child: CircularProgressIndicator()),
-                                              );
-                                            },
-                                          ),
-                                        ),
-                                        CustomPaint(
-                                          size: Size(
-                                              displayedWidth, displayedHeight),
-                                          painter: _HtmlMapPainter(
-                                            holdsList,
-                                            scaleX,
-                                            scaleY,
-                                            fontScale,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                SizedBox(
+                                  width: displayedWidth,
+                                  height: displayedHeight,
+                                  child: WallView(
+                                    wall: _holds.wall,
+                                    roles: _holds.roles,
+                                    dimOthers: true,
                                   ),
                                 ),
                                 const SizedBox(height: 12),
@@ -936,7 +910,7 @@ class _ClimbDisplayState extends State<ClimbDisplay>
                                     ),
                                     Expanded(
                                       child: Center(
-                                        child: ElevatedButton.icon(
+                                        child: FilledButton.icon(
                                           onPressed: () {
                                             final initialGrade = climbGrade == '?'
                                                 ? -1
@@ -1382,46 +1356,4 @@ class _NavArrowButton extends StatelessWidget {
       ),
     );
   }
-}
-
-class _HtmlMapPainter extends CustomPainter {
-  final List<HtmlMapHold> holds;
-  final double scaleX;
-  final double scaleY;
-  final double fontScale;
-
-  _HtmlMapPainter(this.holds, this.scaleX, this.scaleY, this.fontScale);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    for (final hold in holds) {
-      if (hold.selected == 0) continue;
-
-      final scaledPoints =
-          hold.points.map((p) => Offset(p.dx * scaleX, p.dy * scaleY)).toList();
-
-      final path = Path()..addPolygon(scaledPoints, true);
-
-      final fillPaint = Paint()
-        ..color = switch (hold.selected) {
-          1 => Colors.blue.withValues(alpha: 0.75),
-          2 => Colors.orange.withValues(alpha: 0.75),
-          3 => Colors.green.withValues(alpha: 0.75),
-          4 => Colors.purple.withValues(alpha: 0.75),
-          _ => Colors.transparent,
-        }
-        ..style = PaintingStyle.fill;
-
-      final strokePaint = Paint()
-        ..color = Colors.white
-        ..strokeWidth = 1
-        ..style = PaintingStyle.stroke;
-
-      canvas.drawPath(path, fillPaint);
-      canvas.drawPath(path, strokePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _HtmlMapPainter oldDelegate) => true;
 }

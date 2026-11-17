@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'holds.dart';
+import 'data/climb_feed.dart';
 
-const double originalImageWidth = 5712;
-const double originalImageHeight = 4284;
+import 'wall/climb_holds.dart';
+import 'wall/hold_picker.dart';
 
 class ClimbUpdatePage extends StatefulWidget {
   final String climbId;
@@ -20,8 +20,7 @@ class ClimbUpdatePage extends StatefulWidget {
 }
 
 class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
-  late List<HtmlMapHold> holdsList;
-  List<HtmlMapHold> selectedHolds = [];
+  ClimbHolds _holds = ClimbHolds(1);
   bool loading = true;
   String? error;
 
@@ -34,16 +33,7 @@ class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
   @override
   void initState() {
     super.initState();
-    holdsList = holds.map((h) => HtmlMapHold(h.points)).toList();
     _fetchClimbData();
-  }
-
-  @override
-  void dispose() {
-    for (final hold in holdsList) {
-      hold.selected = 0;
-    }
-    super.dispose();
   }
 
   Future<void> _fetchClimbData() async {
@@ -63,18 +53,8 @@ class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
             ? -1
             : int.tryParse(climbGrade.replaceAll(RegExp(r'[vV]'), '')) ?? 0;
 
-        final holdsJson = response['holds'];
-        if (holdsJson != null) {
-          final List<dynamic> holdsData = holdsJson is List ? holdsJson : [];
-          for (final holdData in holdsData) {
-            final int arrayIndex = holdData['array_index'] ?? -1;
-            final int holdState = holdData['holdstate'] ?? 0;
-            if (arrayIndex >= 0 && arrayIndex < holdsList.length) {
-              holdsList[arrayIndex].selected = holdState;
-              selectedHolds.add(holdsList[arrayIndex]);
-            }
-          }
-        }
+        // Keep the climb on the wall it was set on.
+        _holds = ClimbHolds.fromJson(response['holds']);
       }
 
       setState(() => loading = false);
@@ -86,55 +66,13 @@ class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
     }
   }
 
-  bool _hasStartAndFinish() {
-    bool hasStart = false;
-    bool hasFinish = false;
-    for (final hold in selectedHolds) {
-      if (hold.selected == 3) hasStart = true;
-      if (hold.selected == 4) hasFinish = true;
-    }
-    return hasStart && hasFinish;
-  }
-
-  void _handleTap(TapUpDetails details, Size displayedImageSize) {
-    final tapPos = details.localPosition;
-    final scaledTapPos = Offset(
-      tapPos.dx / displayedImageSize.width * originalImageWidth,
-      tapPos.dy / displayedImageSize.height * originalImageHeight,
-    );
-
-    setState(() {
-      for (final hold in holdsList) {
-        if (_isPointInPolygon(scaledTapPos, hold.points)) {
-          hold.selected = (hold.selected + 1) % 5;
-          if (hold.selected == 0) {
-            selectedHolds.remove(hold);
-          } else if (!selectedHolds.contains(hold)) {
-            selectedHolds.add(hold);
-          }
-          break;
-        }
-      }
-    });
-  }
-
   Future<void> _save({bool publish = false}) async {
-    final List<Map<String, dynamic>> holdData = [];
-    for (int i = 0; i < holdsList.length; i++) {
-      if (selectedHolds.contains(holdsList[i])) {
-        holdData.add({
-          'array_index': i,
-          'holdstate': holdsList[i].selected,
-        });
-      }
-    }
-
     try {
       final Map<String, dynamic> update = {
         'name': climbName,
         'grade': climbGrade,
         'notes': notes.isEmpty ? null : notes,
-        'holds': holdData,
+        'holds': _holds.toJson(),
         'private': isPrivate,
       };
       if (widget.isDraft) update['draft'] = publish ? false : true;
@@ -143,6 +81,7 @@ class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
           .from('climbs')
           .update(update)
           .eq('climbid', widget.climbId);
+      ClimbFeed.instance.invalidate();
 
       if (mounted) {
         final message = widget.isDraft
@@ -321,162 +260,56 @@ class _ClimbUpdatePageState extends State<ClimbUpdatePage> {
 
   @override
   Widget build(BuildContext context) {
-    final imageAspectRatio = originalImageWidth / originalImageHeight;
-
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
         title: Text(widget.isDraft
             ? (climbName.isEmpty ? 'Edit Draft' : climbName)
             : 'Update Climb'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
               ? Center(child: Text(error!))
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final displayedWidth = constraints.maxWidth;
-                    final displayedHeight = displayedWidth / imageAspectRatio;
-                    final displayedSize = Size(displayedWidth, displayedHeight);
-
-                    return SingleChildScrollView(
-                      child: Center(
-                        child: Column(
-                          children: [
-                            SizedBox(height: displayedHeight * .5),
-                            InteractiveViewer(
-                              panEnabled: true,
-                              scaleEnabled: true,
-                              minScale: 1.0,
-                              maxScale: 5.0,
-                              child: GestureDetector(
-                                onTapUp: (details) =>
-                                    _handleTap(details, displayedSize),
-                                child: Stack(
-                                  children: [
-                                    ColorFiltered(
-                                      colorFilter: const ColorFilter.matrix([
-                                        1.0722, -0.429, -0.0432, 0, -25.5,
-                                        -0.1278, 0.771, -0.0432, 0, -25.5,
-                                        -0.1278, -0.429, 1.1568, 0, -25.5,
-                                        0, 0, 0, 1, 0,
-                                      ]),
-                                      child: Image.asset(
-                                        'assets/spray_wall.jpeg',
-                                        width: displayedWidth,
-                                        height: displayedHeight,
-                                        fit: BoxFit.fill,
-                                      ),
-                                    ),
-                                    CustomPaint(
-                                      size: displayedSize,
-                                      painter: _HoldPainter(
-                                        holdsList,
-                                        displayedWidth / originalImageWidth,
-                                        displayedHeight / originalImageHeight,
-                                        constraints.maxWidth / 1500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                if (!_hasStartAndFinish()) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Select at least one START and one FINISH hold.',
-                                      ),
-                                    ),
-                                  );
-                                  return;
-                                }
-                                _openForm(context);
-                              },
-                              icon: Icon(widget.isDraft
-                                  ? Icons.arrow_forward
-                                  : Icons.save),
-                              label: Text(
-                                  widget.isDraft ? 'Next' : 'Save Changes'),
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                  vertical: 12,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                          ],
+              : SafeArea(
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: HoldPicker(
+                          holds: _holds,
+                          onChanged: () => setState(() {}),
                         ),
                       ),
-                    );
-                  },
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: () {
+                              if (!_holds.hasStartAndFinish) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Select at least one START and one FINISH hold.',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                              _openForm(context);
+                            },
+                            icon: Icon(widget.isDraft ? Icons.arrow_forward : Icons.save),
+                            label: Text(widget.isDraft ? 'Next' : 'Save Changes'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.deepOrange,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
     );
   }
-}
-
-class _HoldPainter extends CustomPainter {
-  final List<HtmlMapHold> holds;
-  final double scaleX;
-  final double scaleY;
-  final double fontScale;
-
-  _HoldPainter(this.holds, this.scaleX, this.scaleY, this.fontScale);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    for (final hold in holds) {
-      if (hold.selected == 0) continue;
-
-      final scaledPoints =
-          hold.points.map((p) => Offset(p.dx * scaleX, p.dy * scaleY)).toList();
-
-      final path = Path()..addPolygon(scaledPoints, true);
-
-      final fillPaint = Paint()
-        ..color = switch (hold.selected) {
-          1 => Colors.blue.withValues(alpha: 0.75),
-          2 => Colors.orange.withValues(alpha: 0.75),
-          3 => Colors.green.withValues(alpha: 0.75),
-          4 => Colors.purple.withValues(alpha: 0.75),
-          _ => Colors.transparent,
-        }
-        ..style = PaintingStyle.fill;
-
-      final strokePaint = Paint()
-        ..color = Colors.white
-        ..strokeWidth = 1
-        ..style = PaintingStyle.stroke;
-
-      canvas.drawPath(path, fillPaint);
-      canvas.drawPath(path, strokePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _HoldPainter oldDelegate) => true;
-}
-
-bool _isPointInPolygon(Offset point, List<Offset> polygon) {
-  int intersections = 0;
-  for (int i = 0; i < polygon.length; i++) {
-    final p1 = polygon[i];
-    final p2 = polygon[(i + 1) % polygon.length];
-    if ((p1.dy > point.dy) != (p2.dy > point.dy)) {
-      final x =
-          (p2.dx - p1.dx) * (point.dy - p1.dy) / (p2.dy - p1.dy) + p1.dx;
-      if (point.dx < x) intersections++;
-    }
-  }
-  return intersections.isOdd;
 }

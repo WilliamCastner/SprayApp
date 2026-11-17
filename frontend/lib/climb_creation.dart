@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'holds.dart';
+import 'data/climb_feed.dart';
 import 'package:uuid/uuid.dart';
 
-const double originalImageWidth = 5712;
-const double originalImageHeight = 4284;
+import 'wall/climb_holds.dart';
+import 'wall/hold_picker.dart';
+import 'wall/spray_wall.dart';
+import 'wall/wall_view.dart';
 
 class ClimbsPage extends StatefulWidget {
   const ClimbsPage({super.key});
@@ -14,96 +16,54 @@ class ClimbsPage extends StatefulWidget {
 }
 
 class _ClimbsPageState extends State<ClimbsPage> {
-  late List<HtmlMapHold> holdsList;
+  ClimbHolds _holds = ClimbHolds(currentWallId);
+  int _pickerKey = 0;
   int _sliderValue = 0;
-  List<HtmlMapHold> selectedHolds = [];
   bool _isPrivate = false;
 
-  @override
-  void initState() {
-    super.initState();
-    holdsList = holds.map((h) => HtmlMapHold(h.points)).toList();
-  }
-
-  @override
-  void dispose() {
-    for (final hold in holdsList) {
-      hold.selected = 0;
-    }
-    selectedHolds.clear();
-    super.dispose();
-  }
-
-  String generateUuid() {
-    final uuid = Uuid();
-    return uuid.v4();
-  }
-
-  bool _hasStartAndFinish() {
-    bool hasStart = false;
-    bool hasFinish = false;
-
-    for (final hold in selectedHolds) {
-      if (hold.selected == 3) hasStart = true;
-      if (hold.selected == 4) hasFinish = true;
-    }
-
-    return hasStart && hasFinish;
-  }
-
-  void _handleTap(TapUpDetails details, Size displayedImageSize) {
-    final tapPos = details.localPosition;
-
-    final scaledTapPos = Offset(
-      tapPos.dx / displayedImageSize.width * originalImageWidth,
-      tapPos.dy / displayedImageSize.height * originalImageHeight,
-    );
-
-    setState(() {
-      for (final hold in holdsList) {
-        if (_isPointInPolygon(scaledTapPos, hold.points)) {
-          hold.selected = (hold.selected + 1) % 5;
-          if (hold.selected == 0) {
-            selectedHolds.remove(hold);
-          } else if (!selectedHolds.contains(hold)) {
-            selectedHolds.add(hold);
-          }
-          break;
-        }
-      }
-    });
-  }
-
   void _showInfoDialog(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (context) {
-      return AlertDialog(
-        title: const Text('How to Set Holds'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Must have at least 1 start and 1 finish hold.\n'),
-            Text('1 tap (blue) = hand'),
-            Text('2 tap (orange) = foot'),
-            Text('3 tap (green) = start'),
-            Text('4 tap (purple) = finish'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('How to Set Holds'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Pick a hold type below the wall, then tap holds.\n'),
+              for (final r in const [HoldRole.start, HoldRole.hand, HoldRole.foot, HoldRole.finish])
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(color: holdRoleColor(r), shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(holdRoleLabel(r)),
+                  ]),
+                ),
+              const Text(
+                '\nTap a marked hold again, or long-press it, to clear it. '
+                'Pinch to zoom in on small holds.\n\n'
+                'A climb needs at least 1 start and 1 finish hold.',
+              ),
+            ],
           ),
-        ],
-      );
-    },
-  );
-}
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
-
-  Future<void> _insertClimbs(
+  Future<bool> _insertClimbs(
     String name,
     String grade,
     List<Map<String, dynamic>> holds,
@@ -112,13 +72,9 @@ class _ClimbsPageState extends State<ClimbsPage> {
     bool isDraft,
     bool isSent,
   ) async {
-    String climbId = generateUuid();
+    final climbId = const Uuid().v4();
     final user = Supabase.instance.client.auth.currentUser;
-    final userResponse = await Supabase.instance.client.auth.getUser();
-    if (!mounted) return;
-
-    final displayName =
-        userResponse.user?.userMetadata?['display_name'] ?? 'Unknown';
+    final displayName = user?.userMetadata?['display_name'] ?? 'Unknown';
 
     final List<Map<String, dynamic>> ascents = isSent
         ? [
@@ -148,129 +104,73 @@ class _ClimbsPageState extends State<ClimbsPage> {
         if (isSent) 'ascents': ascents,
         if (isSent) 'sends': 1,
       });
+      ClimbFeed.instance.invalidate();
     } catch (e) {
       debugPrint("Error inserting climb: $e");
+      return false;
     }
 
-    // Reset state
-    for (final hold in holdsList) {
-      hold.selected = 0;
-    }
-    selectedHolds.clear();
-    _isPrivate = false;
-    setState(() {});
+    if (!mounted) return true;
+    setState(() {
+      _holds = ClimbHolds(currentWallId);
+      _pickerKey++;
+      _isPrivate = false;
+    });
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
-    final imageAspectRatio = originalImageWidth / originalImageHeight;
-
     return Scaffold(
-appBar: AppBar(
-  leading: IconButton(
-    icon: const Icon(Icons.arrow_back),
-    onPressed: () => Navigator.pop(context),
-  ),
-  title: const Text(''),
-  backgroundColor: Colors.transparent,
-  elevation: 0,
-  actions: [
-    IconButton(
-      icon: const Icon(Icons.info_outline),
-      onPressed: () {
-        _showInfoDialog(context);
-      },
-    ),
-  ],
-),
-
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final displayedWidth = constraints.maxWidth;
-          final displayedHeight = displayedWidth / imageAspectRatio;
-          final displayedSize = Size(displayedWidth, displayedHeight);
-
-          return SingleChildScrollView(
-            child: Center(
-              child: Column(
-                children: [
-                  SizedBox(height: displayedHeight * .5),
-                  InteractiveViewer(
-                    panEnabled: true,
-                    scaleEnabled: true,
-                    minScale: 1.0,
-                    maxScale: 5.0,
-                    child: GestureDetector(
-                      onTapUp: (details) =>
-                          _handleTap(details, displayedSize),
-                      child: Stack(
-                        children: [
-                          ColorFiltered(
-                            colorFilter: const ColorFilter.matrix([
-                              1.0722, -0.429, -0.0432, 0, -25.5,
-                              -0.1278, 0.771, -0.0432, 0, -25.5,
-                              -0.1278, -0.429, 1.1568, 0, -25.5,
-                              0, 0, 0, 1, 0,
-                            ]),
-                            child: Image.asset(
-                              'assets/spray_wall.jpeg',
-                              width: displayedWidth,
-                              height: displayedHeight,
-                              fit: BoxFit.fill,
-                              frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-                                if (wasSynchronouslyLoaded || frame != null) return child;
-                                return SizedBox(
-                                  width: displayedWidth,
-                                  height: displayedHeight,
-                                  child: const Center(child: CircularProgressIndicator()),
-                                );
-                              },
-                            ),
-                          ),
-                          CustomPaint(
-                            size: displayedSize,
-                            painter: _HtmlMapPainter(
-                              holdsList,
-                              displayedWidth / originalImageWidth,
-                              displayedHeight / originalImageHeight,
-                              constraints.maxWidth / 1500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      if (!_hasStartAndFinish()) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Select at least one START and one FINISH hold before creating a climb.',
-                            ),
-                          ),
-                        );
-                        return;
-                      }
-
-                      _openCreateClimbForm(context);
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create Climb'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
+      appBar: AppBar(
+        title: const Text('New Climb'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => _showInfoDialog(context),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: HoldPicker(
+                key: ValueKey(_pickerKey),
+                holds: _holds,
+                onChanged: () => setState(() {}),
               ),
             ),
-          );
-        },
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () {
+                    if (!_holds.hasStartAndFinish) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Select at least one START and one FINISH hold before creating a climb.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                    _openCreateClimbForm(context);
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Create Climb'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _holds.hasStartAndFinish ? Colors.deepOrange : Colors.grey.shade800,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -409,23 +309,7 @@ appBar: AppBar(
                         formKey.currentState!.save();
                         climbGrade = _sliderValue == -1 ? '?' : 'V$_sliderValue';
 
-                        final List<Map<String, dynamic>> holdData = [];
-                        bool hasStart = false;
-                        bool hasFinish = false;
-
-                        for (int i = 0; i < holdsList.length; i++) {
-                          if (selectedHolds.contains(holdsList[i])) {
-                            if (holdsList[i].selected == 3) hasStart = true;
-                            if (holdsList[i].selected == 4) hasFinish = true;
-
-                            holdData.add({
-                              'array_index': i,
-                              'holdstate': holdsList[i].selected,
-                            });
-                          }
-                        }
-
-                        if (!hasStart || !hasFinish) {
+                        if (!_holds.hasStartAndFinish) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text(
@@ -436,16 +320,28 @@ appBar: AppBar(
                           return;
                         }
 
+                        final messenger = ScaffoldMessenger.of(context);
+                        Navigator.pop(context);
                         _insertClimbs(
                           climbName,
                           climbGrade,
-                          holdData,
+                          _holds.toJson(),
                           climbDescription,
                           isPrivate,
                           isDraft,
                           isSent,
-                        );
-                        Navigator.pop(context);
+                        ).then((ok) {
+                          // Opened from the climb list: go back to it so the
+                          // new climb shows up there.
+                          if (ok && !isDraft && mounted && Navigator.canPop(this.context)) {
+                            Navigator.pop(this.context, true);
+                          }
+                          messenger.showSnackBar(SnackBar(
+                            content: Text(ok
+                                ? (isDraft ? 'Draft saved' : 'Climb "$climbName" created')
+                                : 'Could not save the climb. Check your connection and try again.'),
+                          ));
+                        });
                       },
                     ),
                   ],
@@ -458,62 +354,4 @@ appBar: AppBar(
       },
     );
   }
-}
-
-class _HtmlMapPainter extends CustomPainter {
-  final List<HtmlMapHold> holds;
-  final double scaleX;
-  final double scaleY;
-  final double fontScale;
-
-  _HtmlMapPainter(this.holds, this.scaleX, this.scaleY, this.fontScale);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    for (final hold in holds) {
-      if (hold.selected == 0) continue;
-
-      final scaledPoints = hold.points
-          .map((p) => Offset(p.dx * scaleX, p.dy * scaleY))
-          .toList();
-
-      final path = Path()..addPolygon(scaledPoints, true);
-
-      final fillPaint = Paint()
-        ..color = switch (hold.selected) {
-          1 => Colors.blue.withValues(alpha: 0.75),
-          2 => Colors.orange.withValues(alpha: 0.75),
-          3 => Colors.green.withValues(alpha: 0.75),
-          4 => Colors.purple.withValues(alpha: 0.75),
-          _ => Colors.transparent,
-        }
-        ..style = PaintingStyle.fill;
-
-      final strokePaint = Paint()
-        ..color = Colors.white
-        ..strokeWidth = 1
-        ..style = PaintingStyle.stroke;
-
-      canvas.drawPath(path, fillPaint);
-      canvas.drawPath(path, strokePaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _HtmlMapPainter oldDelegate) => true;
-}
-
-bool _isPointInPolygon(Offset point, List<Offset> polygon) {
-  int intersections = 0;
-  for (int i = 0; i < polygon.length; i++) {
-    final p1 = polygon[i];
-    final p2 = polygon[(i + 1) % polygon.length];
-
-    if ((p1.dy > point.dy) != (p2.dy > point.dy)) {
-      final x =
-          (p2.dx - p1.dx) * (point.dy - p1.dy) / (p2.dy - p1.dy) + p1.dx;
-      if (point.dx < x) intersections++;
-    }
-  }
-  return intersections.isOdd;
 }

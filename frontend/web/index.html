@@ -18,21 +18,65 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Spray wall climbs for FA Humboldt.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="spraywall">
+  <meta name="apple-mobile-web-app-title" content="SprayWall">
+  <meta name="theme-color" content="#121212">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>spraywall</title>
+  <title>SprayWall</title>
+  <!-- Open connections early: the database and the graphics engine CDN. -->
+  <link rel="preconnect" href="https://foildoggpbubivuigqmj.supabase.co" crossorigin>
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <style>
+    /* Dark from the first paint (the app is dark), with a small loader
+       until Flutter draws its first frame. */
+    html, body { margin: 0; height: 100%; background: #121212; }
+    #boot { position: fixed; inset: 0; display: flex; align-items: center;
+            justify-content: center; }
+    #boot div { width: 28px; height: 28px; border-radius: 50%;
+                border: 3px solid #333; border-top-color: #ff5722;
+                animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+  <script>
+    // Start downloading the climbs right away, while the app itself is
+    // still loading. The app picks this up (lib/data/early_feed_web.dart)
+    // instead of making its own first request.
+    // The public key goes in the URL and there are no custom headers, so the
+    // browser sends it at once (no CORS preflight round trip). This returns
+    // public climbs; for a signed-in user the app refreshes right after to
+    // add their own private ones.
+    (function () {
+      try {
+        var base = 'https://foildoggpbubivuigqmj.supabase.co/rest/v1/';
+        var key = 'apikey=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvaWxkb2dncGJ1Yml2dWlncW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM3MTUzNTgsImV4cCI6MjA2OTI5MTM1OH0.f2n8gquVdGel81MyE4dD9M68B-IHk-DIxyWaaunbuIc';
+        var cols = 'climbid,name,grade,createdat,displayname,private,id,draft,sends,ascents,holds,notes,wall:holds->0->>wall';
+        var get = function (path) {
+          return fetch(base + path + '&' + key)
+            .then(function (r) { return r.ok ? r.text() : null; });
+        };
+        window.__sprayEarlyFeed = Promise.all([
+          get('climbs?select=' + encodeURIComponent(cols) + '&order=createdat.desc'),
+          get('liked_climbs?select=setter_name'),
+        ]).catch(function () { return null; });
+      } catch (e) { /* the app falls back to its own request */ }
+      window.addEventListener('flutter-first-frame', function () {
+        var b = document.getElementById('boot');
+        if (b) b.remove();
+      });
+    })();
+  </script>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <div id="boot"><div></div></div>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

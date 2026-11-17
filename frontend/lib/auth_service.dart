@@ -93,25 +93,64 @@ class AuthService {
     await _supabase.auth.signOut();
   }
 
-  // Delete account - permanently removes the user
-Future<void> deleteAccount() async {
-  final user = _supabase.auth.currentUser;
-  if (user == null) {
-    throw AuthException('No user logged in');
+  /// Permanently delete the signed-in account and everything it owns.
+  ///
+  /// Video files live in storage, which SQL can't clean up, so remove them
+  /// here first; the `delete_user` database function then removes the rows
+  /// (sends, comments, likes, saves, videos, climbs, profile, login).
+  /// Ends with a local sign-out so no stale session is left behind.
+  Future<void> deleteAccount() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) {
+      throw AuthException('No user logged in');
+    }
+
+    try {
+      final videos = await _supabase
+          .from('beta_videos')
+          .select('storage_path')
+          .eq('user_id', user.id);
+      final paths = <String>[
+        for (final v in videos)
+          if (v['storage_path'] is String) ...[
+            v['storage_path'] as String,
+            (v['storage_path'] as String).replaceAll('.mp4', '_thumb.jpg'),
+          ],
+      ];
+      if (paths.isNotEmpty) {
+        await _supabase.storage.from('beta-videos').remove(paths);
+      }
+    } catch (_) {
+      // Files are best effort; never block deleting the account.
+    }
+
+    try {
+      await _supabase.rpc('delete_user');
+    } catch (e) {
+      throw AuthException('Failed to delete account: $e');
+    }
+    await _supabase.auth.signOut();
   }
 
-  try {
-    // Call the RPC function (no parameters needed)
-    await _supabase.rpc('delete_user');
-  } catch (e) {
-    throw AuthException('Failed to delete account: $e');
+  /// Change the display name everywhere it appears (profile, climbs set,
+  /// sends, comments, videos, likes) in one database call, so stats and
+  /// profile pages don't split between the old and new name.
+  Future<void> renameUser(String newName) async {
+    final error = validateUsername(newName);
+    if (error != null) throw AuthException(error);
+    try {
+      await _supabase.rpc('rename_user', params: {'new_name': newName});
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202') rethrow;
+      // Function not installed yet: old behaviour (profile only).
+      await _supabase.from('profiles').upsert({
+        'id': _supabase.auth.currentUser!.id,
+        'display_name': newName,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    }
+    await _supabase.auth.updateUser(UserAttributes(data: {'display_name': newName}));
   }
-}
-
-Future<void> deleteUserData(String userId) async {
-  // This is now handled by the RPC function
-  // Remove this method or keep it empty
-}
 
   Future<void> sendPasswordResetEmail(String email) async {
     await _supabase.auth.resetPasswordForEmail(
